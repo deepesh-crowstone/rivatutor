@@ -13,6 +13,9 @@ PRISMA_PROVIDER = "postgresql"
 [deploy]
 # Apply Prisma schema after build, before the app starts (uses runtime DATABASE_URL).
 releaseCommand = "node scripts/prepare-database.mjs && npx prisma db push --skip-generate"
+# startup.mjs re-runs db push idempotently, then starts Next.js (safety net if release fails).
 startCommand = "npm start"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

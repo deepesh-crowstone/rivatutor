@@ -21,6 +21,12 @@ function createPrismaClient(): PrismaClient {
       );
     }
 
+    if (!url.startsWith("postgres://") && !url.startsWith("postgresql://")) {
+      throw new Error(
+        "DATABASE_URL must be a PostgreSQL connection string on Railway. Set DATABASE_URL=${{Postgres.DATABASE_URL}} in Railway Variables.",
+      );
+    }
+
     const { PrismaPg } = require("@prisma/adapter-pg") as typeof import("@prisma/adapter-pg");
     const { Pool: PgPool } = require("pg") as typeof import("pg");
 

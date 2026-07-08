@@ -26,8 +26,15 @@ This guide covers deploying the [rivatutor](https://github.com/deepesh-crowstone
 Railway’s filesystem is **ephemeral** — a local SQLite file (`dev.db`) is **lost on every redeploy and restart**. For any shared or persistent POC, use PostgreSQL.
 
 1. In your Railway project, click **+ New** → **Database** → **PostgreSQL**.
-2. Railway injects `DATABASE_URL` into the web service (reference the Postgres service’s variable if needed: `${{Postgres.DATABASE_URL}}`).
-3. On deploy, `releaseCommand` runs `prisma db push` against that URL. The app auto-selects the PostgreSQL Prisma schema when `DATABASE_URL` starts with `postgres://` or `postgresql://`.
+2. On the **web service** (not only the Postgres service), set:
+
+   ```text
+   DATABASE_URL=${{Postgres.DATABASE_URL}}
+   ```
+
+   Use the **Variable Reference** picker in Railway → **Variables** so the web service receives the Postgres connection string. Do **not** leave `DATABASE_URL=file:./dev.db` from local dev — that creates an empty ephemeral SQLite file and causes errors like `The table main.LearnerProfile does not exist`.
+
+3. On deploy, `releaseCommand` and `scripts/startup.mjs` both run `prisma db push` against that URL. The app auto-selects the PostgreSQL Prisma schema when `DATABASE_URL` starts with `postgres://` or `postgresql://`, or when running on Railway without the local SQLite default.
 
 No manual migration step is required for this POC (the project uses `db push`, not migration files).
 
@@ -56,7 +63,7 @@ Copy from `.env.example` and set these in Railway → your service → **Variabl
 |----------|-------------|
 | `OPENROUTER_API_KEY` | OpenRouter API key for LLM chat |
 | `ELEVENLABS_API_KEY` | ElevenLabs key (always used for speech-to-text) |
-| `DATABASE_URL` | `postgresql://...` from Railway Postgres (recommended) or `file:/data/riva.db` with a volume |
+| `DATABASE_URL` | **Required on web service:** `${{Postgres.DATABASE_URL}}` (recommended). Do not use `file:./dev.db` on Railway. |
 
 ### Recommended for production
 
@@ -119,7 +126,8 @@ Railway detects Next.js via Nixpacks. This repo includes `railway.toml`:
 | **Install** | `npm install` → `postinstall` runs `prepare-database` + `prisma generate` |
 | **Build** | `npm run build` → selects DB schema (reads `.env` + Railway env), generates Prisma client, `next build` |
 | **Release** | `node scripts/prepare-database.mjs && npx prisma db push --skip-generate` |
-| **Start** | `npm start` → `next start` (binds to `PORT`) |
+| **Start** | `npm start` → `scripts/startup.mjs` logs provider/DB URL, runs `db push` again (idempotent), then `next start` |
+| **Health** | `GET /api/health` — returns `{ ok, provider, database }`; configured as Railway health check |
 
 Node.js **20+** is required (`engines` in `package.json`). `railway.toml` sets `NIXPACKS_NODE_VERSION=20` and `PRISMA_PROVIDER=postgresql` so the build generates a PostgreSQL Prisma client even before `DATABASE_URL` is linked.
 
@@ -161,6 +169,7 @@ npm start
 
 | Issue | Fix |
 |-------|-----|
+| `The table main.LearnerProfile does not exist` | Web service is using SQLite (`file:./dev.db`) instead of Postgres. Set `DATABASE_URL=${{Postgres.DATABASE_URL}}` on the **web** service, redeploy, and check deploy logs for `[startup] Applying Prisma schema`. |
 | Build fails on `better-sqlite3` | Prefer PostgreSQL on Railway; or retry deploy (Nixpacks needs native build tools). |
 | Build fails with Prisma adapter/provider mismatch | Ensure `prepare-database` and runtime use the same provider. On Railway, `PRISMA_PROVIDER=postgresql` is set in `railway.toml`. Locally, set `DATABASE_URL` in `.env` before `npm run build`, or export `PRISMA_PROVIDER`. |
 | `OPENROUTER_API_KEY is required` | Set the variable in Railway and redeploy. This should only appear at **runtime** in API routes, not during `next build`. |
@@ -173,8 +182,9 @@ npm start
 
 ## Files added for Railway
 
-- `railway.toml` — build, release, and start commands
+- `railway.toml` — build, release, start commands, and `/api/health` health check
 - `scripts/prepare-database.mjs` — picks SQLite vs PostgreSQL Prisma schema from `DATABASE_URL`
+- `scripts/startup.mjs` — startup logs, idempotent `db push`, then `next start`
 - `prisma/schema.sqlite.prisma` / `prisma/schema.postgresql.prisma` — provider-specific schemas
 - `lib/db.ts` — uses SQLite or PostgreSQL driver adapter based on `DATABASE_URL`
 

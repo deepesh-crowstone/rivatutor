@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/prepare-database.mjs && prisma generate && next build",
-    "start": "next start",
+    "start": "node scripts/startup.mjs",
+    "start:next": "next start",
     "lint": "eslint .",
     "test": "node scripts/prepare-database.mjs && prisma generate && vitest run",
     "test:watch": "vitest",

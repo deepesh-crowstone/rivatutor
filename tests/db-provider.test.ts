@@ -10,12 +10,21 @@ describe("resolveUsePostgres", () => {
     ).toBe(true);
   });
 
-  it("selects sqlite from file DATABASE_URL", () => {
+  it("selects sqlite from file DATABASE_URL locally", () => {
     expect(
       resolveUsePostgres({
         DATABASE_URL: "file:./dev.db",
       } as NodeJS.ProcessEnv),
     ).toBe(false);
+  });
+
+  it("ignores default sqlite DATABASE_URL on Railway", () => {
+    expect(
+      resolveUsePostgres({
+        DATABASE_URL: "file:./dev.db",
+        RAILWAY_ENVIRONMENT_NAME: "production",
+      } as NodeJS.ProcessEnv),
+    ).toBe(true);
   });
 
   it("selects postgres when PRISMA_PROVIDER is postgresql", () => {

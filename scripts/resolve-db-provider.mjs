@@ -11,6 +11,14 @@ function isOnRailway(env) {
   );
 }
 
+function isEphemeralDevSqliteUrl(databaseUrl) {
+  return (
+    databaseUrl === "file:./dev.db" ||
+    databaseUrl === "file:dev.db" ||
+    /file:\.?\/dev\.db$/i.test(databaseUrl)
+  );
+}
+
 export function resolveUsePostgres(env = process.env) {
   const databaseUrl = env.DATABASE_URL ?? "";
   const forcedProvider = env.PRISMA_PROVIDER?.trim().toLowerCase();
@@ -29,6 +37,11 @@ export function resolveUsePostgres(env = process.env) {
   }
 
   if (databaseUrl.startsWith("file:")) {
+    // Railway often inherits file:./dev.db from local .env.example — never use ephemeral SQLite there.
+    if (onRailway && isEphemeralDevSqliteUrl(databaseUrl)) {
+      return true;
+    }
+
     return false;
   }
 
