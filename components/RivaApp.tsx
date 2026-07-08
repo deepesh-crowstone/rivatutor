@@ -8,6 +8,10 @@ import { buildAssistantSpeechSegments } from "@/lib/assistant-speech";
 import { sanitizeQuestionStepIntroReply } from "@/lib/lesson-delivery";
 import { deriveComposerState, type ComposerMode, type RecordingTarget } from "@/lib/composer-mode";
 import { isStreamingPcmResponse, PcmChunkPlayer } from "@/lib/pcm-player";
+import {
+  getPendingAssistantMessagesForTts,
+  markAssistantMessageSkipped,
+} from "@/lib/tts-playback-queue";
 import { TtsSessionTracker } from "@/lib/tts-session";
 import { parseUsernameInput } from "@/lib/username-rules";
 type ComposerPhase = "idle" | "transcribing" | "waitingForRiva";
@@ -37,6 +41,7 @@ export function RivaApp() {
   const chunksRef = useRef<BlobPart[]>([]);
   const discardRecordingRef = useRef(false);
   const lastSpokenIdRef = useRef<string | null>(null);
+  const currentlySpeakingMessageIdRef = useRef<string | null>(null);
   const pcmPlayerRef = useRef<PcmChunkPlayer | null>(null);
   const ttsSessionRef = useRef(new TtsSessionTracker());
   const ttsAbortControllerRef = useRef<AbortController | null>(null);
@@ -147,10 +152,18 @@ export function RivaApp() {
       const nextState = await api<AppState>("/api/session", { method: "DELETE" });
       setState(nextState);
       lastSpokenIdRef.current = null;
+      currentlySpeakingMessageIdRef.current = null;
     });
   }
 
   function abortTtsPlayback() {
+    const messages = state?.messages ?? [];
+    lastSpokenIdRef.current = markAssistantMessageSkipped(
+      messages,
+      currentlySpeakingMessageIdRef.current,
+      lastSpokenIdRef.current,
+    );
+    currentlySpeakingMessageIdRef.current = null;
     ttsSessionRef.current.abort();
     ttsAbortControllerRef.current?.abort();
     ttsAbortControllerRef.current = null;
@@ -536,29 +549,26 @@ export function RivaApp() {
       return;
     }
 
-    let startIndex = 0;
-    if (lastSpokenIdRef.current) {
-      const lastIndex = messages.findIndex((message) => message.id === lastSpokenIdRef.current);
-      startIndex = lastIndex >= 0 ? lastIndex + 1 : 0;
-    }
-
-    const pendingAssistantMessages = messages
-      .slice(startIndex)
-      .filter((message) => message.role === "assistant");
+    const pendingAssistantMessages = getPendingAssistantMessagesForTts(
+      messages,
+      lastSpokenIdRef.current,
+    );
     if (pendingAssistantMessages.length === 0) {
       return;
     }
 
     void (async () => {
       for (const message of pendingAssistantMessages) {
+        currentlySpeakingMessageIdRef.current = message.id;
         const completed = await speakAssistantMessage(message);
         if (!completed) {
           break;
         }
         lastSpokenIdRef.current = message.id;
+        currentlySpeakingMessageIdRef.current = null;
       }
     })();
-    // Playback queues every new assistant message since the last spoken id.
+    // Playback queues assistant messages only after the latest user turn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.messages]);
 
