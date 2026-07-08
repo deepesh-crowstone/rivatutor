@@ -1,0 +1,866 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import type { AppState, ChatMessageDto, LessonStepDto, QuestionCardMetadata } from "@/lib/domain";
+import { CEFR_LEVELS } from "@/lib/domain";
+import { SAR_QUESTION_PROMPT, stripUiInstructions } from "@/lib/content";
+import { buildAssistantSpeechSegments } from "@/lib/assistant-speech";
+import { sanitizeQuestionStepIntroReply } from "@/lib/lesson-delivery";
+import { deriveComposerState, type ComposerMode, type RecordingTarget } from "@/lib/composer-mode";
+import { isStreamingPcmResponse, PcmChunkPlayer } from "@/lib/pcm-player";
+import { parseUsernameInput } from "@/lib/username-rules";
+type ComposerPhase = "idle" | "transcribing" | "waitingForRiva";
+
+const PENDING_USER_MESSAGE_ID = "pending-user-message";
+
+function parseQuestionMetadata(metadata: unknown): QuestionCardMetadata | null {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  return metadata as QuestionCardMetadata;
+}
+
+function isSarLessonStep(step: LessonStepDto | null | undefined): boolean {
+  return step?.type === "question" && step.questionType === "sar";
+}
+
+export function RivaApp() {
+  const [state, setState] = useState<AppState | null>(null);
+  const [loading, setLoading] = useState("Riva load ho rahi hai...");
+  const [error, setError] = useState("");
+  const [composerPhase, setComposerPhase] = useState<ComposerPhase>("idle");
+  const [pendingUserMessage, setPendingUserMessage] = useState<ChatMessageDto | null>(null);
+  const [recordingTarget, setRecordingTarget] = useState<RecordingTarget | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const discardRecordingRef = useRef(false);
+  const lastSpokenIdRef = useRef<string | null>(null);
+  const pcmPlayerRef = useRef<PcmChunkPlayer | null>(null);
+  const ttsPlaybackIdRef = useRef(0);
+  const scrollAnchorRef = useRef<HTMLDivElement>(null);
+
+  const pendingTopics = useMemo(
+    () => (state?.topics ?? []).filter((topic) => topic.status === "pending").slice(0, 3),
+    [state?.topics],
+  );
+
+  const { needsUsername, needsName, needsLevel, hasCurriculum, hasActiveTopic, composerMode, micDisabled } =
+    deriveComposerState(state);
+  const composerBusy = composerPhase !== "idle";
+
+  async function refreshState() {
+    await run("Riva load ho rahi hai...", async () => {
+      setState(await api<AppState>("/api/session"));
+    });
+  }
+
+  async function submitUsernameAnswer(rawUsername: string) {
+    const username = parseUsernameInput(rawUsername);
+    setState(await api("/api/session/username", { method: "POST", body: { username } }));
+    return true;
+  }
+
+  async function submitOnboardingAnswer(answer: string) {
+    if (!answer.trim()) {
+      setError(needsName ? "Riva ko apna naam batayein." : "Level chuno jaise A1, A2, B1, B2, C1, ya C2.");
+      return false;
+    }
+
+    setState(await api("/api/onboarding", { method: "POST", body: { answer } }));
+    return true;
+  }
+
+  async function selectLevel(level: string) {
+    await run("Aapka level save ho raha hai...", async () => {
+      setState(await api("/api/onboarding", { method: "POST", body: { answer: level } }));
+    });
+  }
+
+  async function submitIntentAnswer(answer: string) {
+    if (!answer.trim()) {
+      setError("Riva ko batayein aap English kyun seekhna chahte hain.");
+      return false;
+    }
+
+    setState(await api("/api/intent", { method: "POST", body: { answer } }));
+    return true;
+  }
+
+  async function selectTopic(topicId: string) {
+    await run("Lesson plan ban raha hai...", async () => {
+      setState(await api("/api/topics/select", { method: "POST", body: { topicId } }));
+    });
+  }
+
+  async function selectFreeformTopicAnswer(topic: string) {
+    if (!topic.trim()) {
+      setError("Riva ko batayein kya topic sikhana hai.");
+      return false;
+    }
+
+    setState(
+      await api("/api/topics/select", {
+        method: "POST",
+        body: { freeformTitle: topic },
+      }),
+    );
+    return true;
+  }
+
+  async function submitLessonAnswer(answer: string) {
+    setState(await api("/api/lesson/answer", { method: "POST", body: { answer } }));
+    return true;
+  }
+
+  async function submitTranscriptFromMic(text: string, mode: RecordingTarget) {
+    const trimmed = text.trim();
+
+    if (mode === "onboarding") {
+      return submitOnboardingAnswer(trimmed);
+    }
+
+    if (mode === "intent") {
+      return submitIntentAnswer(trimmed);
+    }
+
+    if (mode === "topic") {
+      return selectFreeformTopicAnswer(trimmed);
+    }
+
+    if (mode === "lesson") {
+      return submitLessonAnswer(trimmed);
+    }
+
+    return false;
+  }
+
+  async function reset() {
+    await run("Sign out ho rahe hain...", async () => {
+      const nextState = await api<AppState>("/api/session", { method: "DELETE" });
+      setState(nextState);
+      lastSpokenIdRef.current = null;
+    });
+  }
+
+  async function run(label: string, action: () => Promise<void>) {
+    setError("");
+    setLoading(label);
+    try {
+      await action();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Kuch galat ho gaya.");
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function startRecording(target: RecordingTarget) {
+    try {
+      setError("");
+      discardRecordingRef.current = false;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorderRef.current = recorder;
+      setRecordingTarget(target);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recorderRef.current = null;
+
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          chunksRef.current = [];
+          return;
+        }
+
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        chunksRef.current = [];
+        void transcribeAndSubmit(blob, target);
+      };
+
+      recorder.start();
+    } catch {
+      setError("Microphone access block ya unavailable hai.");
+      setRecordingTarget(null);
+    }
+  }
+
+  function stopRecording() {
+    discardRecordingRef.current = false;
+    recorderRef.current?.stop();
+    setRecordingTarget(null);
+  }
+
+  function discardRecording() {
+    if (!recorderRef.current) {
+      return;
+    }
+
+    discardRecordingRef.current = true;
+    chunksRef.current = [];
+    recorderRef.current.stop();
+    setRecordingTarget(null);
+  }
+
+  async function transcribeAndSubmit(blob: Blob, target: RecordingTarget) {
+    setError("");
+    setComposerPhase("transcribing");
+
+    try {
+      const formData = new FormData();
+      formData.append("audio", blob, "riva-answer.webm");
+      const response = await fetch("/api/stt", { method: "POST", body: formData });
+      const payload = (await response.json()) as { text?: string; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not transcribe audio.");
+      }
+
+      const text = payload.text ?? "";
+      const trimmed = text.trim();
+      const hidePendingUserMessage =
+        target === "lesson" && isSarLessonStep(state?.currentStep ?? null);
+      if (trimmed && !hidePendingUserMessage) {
+        setPendingUserMessage({
+          id: PENDING_USER_MESSAGE_ID,
+          role: "user",
+          kind: "message",
+          content: trimmed,
+          metadata: null,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      setComposerPhase("waitingForRiva");
+      const submitted = await submitTranscriptFromMic(text, target);
+      if (!submitted) {
+        setPendingUserMessage(null);
+        return;
+      }
+
+      setPendingUserMessage(null);
+    } catch (caught) {
+      setPendingUserMessage(null);
+      setError(caught instanceof Error ? caught.message : "Kuch galat ho gaya.");
+    } finally {
+      setComposerPhase("idle");
+    }
+  }
+
+  async function speakAssistantMessage(message: ChatMessageDto) {
+    const segments = buildAssistantSpeechSegments(message);
+    for (const segment of segments) {
+      await playTts(segment);
+    }
+  }
+
+  async function playTts(text: string) {
+    const spokenText = cleanSpokenText(text);
+    if (!spokenText) {
+      return false;
+    }
+
+    const playbackId = ttsPlaybackIdRef.current + 1;
+    ttsPlaybackIdRef.current = playbackId;
+    pcmPlayerRef.current?.stop();
+    window.speechSynthesis?.cancel();
+
+    if (state?.missingApiKey) {
+      return speakWithBrowserVoice(spokenText);
+    }
+
+    try {
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: spokenText }),
+      });
+      if (playbackId !== ttsPlaybackIdRef.current) {
+        return false;
+      }
+      if (!response.ok) {
+        return speakWithBrowserVoice(spokenText);
+      }
+
+      if (isStreamingPcmResponse(response)) {
+        if (!pcmPlayerRef.current) {
+          pcmPlayerRef.current = new PcmChunkPlayer();
+        }
+
+        const played = await pcmPlayerRef.current.playResponse(response);
+        if (playbackId !== ttsPlaybackIdRef.current) {
+          return false;
+        }
+        if (played) {
+          return true;
+        }
+
+        return speakWithBrowserVoice(spokenText);
+      }
+
+      const blob = await response.blob();
+      if (playbackId !== ttsPlaybackIdRef.current) {
+        return false;
+      }
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+      };
+      await audio.play();
+      return true;
+    } catch {
+      if (playbackId !== ttsPlaybackIdRef.current) {
+        return false;
+      }
+      return speakWithBrowserVoice(spokenText);
+    }
+  }
+
+  const displayMessages = useMemo(() => {
+    const serverMessages = state?.messages ?? [];
+    if (!pendingUserMessage) {
+      return serverMessages;
+    }
+
+    const serverAlreadyHasPending = serverMessages.some(
+      (message) => message.role === "user" && message.content === pendingUserMessage.content,
+    );
+    if (serverAlreadyHasPending) {
+      return serverMessages;
+    }
+
+    return [...serverMessages, pendingUserMessage];
+  }, [pendingUserMessage, state?.messages]);
+
+  const chatScrollKey = useMemo(() => {
+    const messageKey = displayMessages
+      .map((message) => `${message.id}:${message.content.length}:${message.kind}`)
+      .join("|");
+    return [messageKey, composerPhase, loading, needsLevel, pendingTopics.length].join("::");
+  }, [composerPhase, displayMessages, loading, needsLevel, pendingTopics.length]);
+
+  useEffect(() => {
+    const scrollToLatest = () => {
+      scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    };
+
+    const frame = requestAnimationFrame(scrollToLatest);
+    return () => cancelAnimationFrame(frame);
+  }, [chatScrollKey]);
+
+  useEffect(() => {
+    void refreshState();
+    // Load the persisted learner state once when the chat shell mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const messages = state?.messages ?? [];
+    if (messages.length === 0) {
+      return;
+    }
+
+    let startIndex = 0;
+    if (lastSpokenIdRef.current) {
+      const lastIndex = messages.findIndex((message) => message.id === lastSpokenIdRef.current);
+      startIndex = lastIndex >= 0 ? lastIndex + 1 : 0;
+    }
+
+    const pendingAssistantMessages = messages
+      .slice(startIndex)
+      .filter((message) => message.role === "assistant");
+    if (pendingAssistantMessages.length === 0) {
+      return;
+    }
+
+    void (async () => {
+      for (const message of pendingAssistantMessages) {
+        await speakAssistantMessage(message);
+        lastSpokenIdRef.current = message.id;
+      }
+    })();
+    // Playback queues every new assistant message since the last spoken id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.messages]);
+
+  return (
+    <main className="page">
+      <section className="chat-stage">
+        <header className="chat-header">
+          <div>
+            <p className="eyebrow">AI English Teacher POC</p>
+            <h1>Riva Teacher</h1>
+            <p className="lede">Personalized spoken-English lessons — Hinglish se seekho</p>
+          </div>
+          <div className="button-row">
+            {state?.profile.username ? (
+              <span className="header-username" aria-label={`Signed in as ${state.profile.username}`}>
+                @{state.profile.username}
+              </span>
+            ) : null}
+            <button className="danger" type="button" onClick={reset}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <div className="chat-body">
+          {state?.missingApiKey ? (
+            <div className="notice">
+              Add `OPENROUTER_API_KEY` (LLM + default TTS), `ELEVENLABS_API_KEY` (STT), and
+              `VERTEX_API_KEY` (only when `TTS_PROVIDER=vertex`) to `.env` before using AI and speech
+              features.
+            </div>
+          ) : null}
+          {error ? <div className="error">{error}</div> : null}
+          {loading ? <div className="notice">{loading}</div> : null}
+
+          <MessageList messages={displayMessages} currentStep={state?.currentStep ?? null} />
+          {composerPhase === "waitingForRiva" ? <RivaThinkingIndicator /> : null}
+
+          {needsLevel ? (
+            <LevelSuggestions disabled={Boolean(loading) || composerBusy} onSelectLevel={selectLevel} />
+          ) : null}
+
+          {hasCurriculum && !hasActiveTopic ? (
+            <TopicSuggestions
+              topics={pendingTopics}
+              disabled={Boolean(loading) || composerBusy}
+              onSelectTopic={selectTopic}
+            />
+          ) : null}
+          <div ref={scrollAnchorRef} className="chat-scroll-anchor" aria-hidden="true" />
+        </div>
+
+        {needsUsername ? (
+          <UsernameModal
+            disabled={Boolean(loading)}
+            serverError={error}
+            onSubmit={async (username) => {
+              await run("Sign in ho rahe hain...", async () => {
+                await submitUsernameAnswer(username);
+              });
+            }}
+          />
+        ) : (
+          <Composer
+            mode={composerMode}
+            disabled={Boolean(loading) || composerMode === "blocked" || composerBusy}
+            micDisabled={micDisabled}
+            phase={composerPhase}
+            recording={recordingTarget === composerMode}
+            onToggleRecord={() => {
+              if (micDisabled || composerMode === "blocked") {
+                return;
+              }
+
+              recordingTarget === composerMode ? stopRecording() : startRecording(composerMode);
+            }}
+            onDiscardRecording={discardRecording}
+          />
+        )}
+      </section>
+    </main>
+  );
+}
+
+function UsernameModal(props: {
+  disabled: boolean;
+  serverError: string;
+  onSubmit: (username: string) => Promise<void>;
+}) {
+  const [username, setUsername] = useState("");
+  const [validationError, setValidationError] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setValidationError("");
+
+    try {
+      const normalized = parseUsernameInput(username);
+      await props.onSubmit(normalized);
+    } catch (caught) {
+      setValidationError(caught instanceof Error ? caught.message : "Username valid nahi hai.");
+    }
+  }
+
+  const displayError = validationError || props.serverError;
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="username-modal-title">
+      <div className="modal-card setup-card">
+        <h2 id="username-modal-title">Apna username daalein</h2>
+        <p className="subtle">
+          Naya username chuno ya purane se wapas sign in karein. Aapki conversation history har username ke
+          saath save hoti hai.
+        </p>
+        <form className="stack" onSubmit={handleSubmit}>
+          <div className="field">
+            <label htmlFor="username-input">
+              <span>Username</span>
+            </label>
+            <input
+              id="username-input"
+              name="username"
+              type="text"
+              autoComplete="username"
+              autoFocus
+              value={username}
+              disabled={props.disabled}
+              placeholder="e.g. dipesh"
+              onChange={(event) => setUsername(event.target.value)}
+            />
+          </div>
+          {displayError ? <div className="error modal-error">{displayError}</div> : null}
+          <div className="button-row">
+            <button className="primary" type="submit" disabled={props.disabled || !username.trim()}>
+              Aage badho
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function LevelSuggestions(props: {
+  disabled: boolean;
+  onSelectLevel: (level: string) => void;
+}) {
+  return (
+    <div className="message-row assistant-row">
+      <div className="avatar">R</div>
+      <div className="message assistant choice-message">
+        <span className="message-meta">Riva</span>
+        <strong>Apna current level chuno:</strong>
+        <div className="topic-grid level-grid">
+          {CEFR_LEVELS.map((level) => (
+            <button
+              key={level}
+              className="topic-card level-card"
+              type="button"
+              disabled={props.disabled}
+              onClick={() => props.onSelectLevel(level)}
+            >
+              <span className="pill">{level}</span>
+              <h3>Level {level}</h3>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopicSuggestions(props: {
+  topics: AppState["topics"];
+  disabled: boolean;
+  onSelectTopic: (topicId: string) => void;
+}) {
+  if (props.topics.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="message-row assistant-row">
+      <div className="avatar">R</div>
+      <div className="message assistant choice-message">
+        <span className="message-meta">Riva</span>
+        <strong>Neeche se topic chuno ya bolo kya practice karna hai.</strong>
+        <div className="topic-grid">
+          {props.topics.map((topic) => (
+            <button
+              key={topic.id}
+              className="topic-card"
+              type="button"
+              disabled={props.disabled}
+              onClick={() => props.onSelectTopic(topic.id)}
+            >
+              <span className="pill">Suggested</span>
+              <h3>{topic.title}</h3>
+              <p>{topic.description}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssistantMessageBody({
+  message,
+  currentStep,
+}: {
+  message: ChatMessageDto;
+  currentStep: LessonStepDto | null;
+}) {
+  const metadata = parseQuestionMetadata(message.metadata);
+  const isQuestion = message.kind === "question";
+
+  if (!isQuestion) {
+    return message.content;
+  }
+
+  const isSar = metadata?.questionType === "sar";
+  const expectedAnswer =
+    metadata?.expectedAnswer ??
+    (metadata?.stepId && currentStep?.id === metadata.stepId ? currentStep.expectedAnswer : null) ??
+    "";
+  const questionPrompt =
+    metadata?.questionPrompt ??
+    (metadata?.stepId && currentStep?.id === metadata.stepId ? currentStep.content : null) ??
+    message.content;
+  const introContent = sanitizeQuestionStepIntroReply(
+    {
+      type: "question",
+      questionType: metadata?.questionType ?? "open_ended",
+      content: questionPrompt ?? "",
+      expectedAnswer: expectedAnswer || null,
+    },
+    message.content,
+  );
+  const graded = Boolean(metadata?.wordDiff);
+  const sarWords =
+    metadata?.wordDiff?.tokens ??
+    expectedAnswer
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter(Boolean)
+      .map((word) => ({ word, status: "pending" as const }));
+
+  return (
+    <>
+      {introContent.trim() ? <p className="message-body">{introContent}</p> : null}
+      <div className="message-question-section">
+        {isSar ? (
+          <>
+            <p className="question-prompt">{metadata?.questionPrompt ?? SAR_QUESTION_PROMPT}</p>
+            {sarWords.length > 0 ? (
+              <div
+                className="question-words"
+                aria-label={graded ? "Aapke words ka match" : "Repeat karne ke liye words"}
+              >
+                {sarWords.map((token, index) => (
+                  <span className={`question-word question-word-${token.status}`} key={`${token.word}-${index}`}>
+                    {token.word}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {graded && metadata?.wordDiff ? (
+              <p className="question-score">
+                {metadata.wordDiff.correctCount} mein se {metadata.wordDiff.expectedCount} words match hue (
+                {metadata.wordDiff.score}%)
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="question-prompt">{questionPrompt}</p>
+        )}
+      </div>
+    </>
+  );
+}
+
+function RivaThinkingIndicator() {
+  return (
+    <div className="message-row assistant-row" aria-live="polite" aria-busy="true">
+      <div className="avatar">R</div>
+      <div className="message assistant riva-thinking">
+        <span className="message-meta">Riva</span>
+        <div className="thinking-shimmer">
+          <span className="thinking-label">Riva soch rahi hai...</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageList({
+  messages,
+  currentStep,
+}: {
+  messages: ChatMessageDto[];
+  currentStep: LessonStepDto | null;
+}) {
+  if (messages.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="messages">
+      {messages.map((message) => (
+        <div
+          className={`message-row ${message.role === "user" ? "user-row" : "assistant-row"}`}
+          key={message.id}
+        >
+          {message.role !== "user" ? <div className="avatar">R</div> : null}
+          <div className={`message ${message.role}`}>
+            <span className="message-meta">{message.role === "user" ? "You" : "Riva"}</span>
+            <AssistantMessageBody message={message} currentStep={currentStep} />
+          </div>
+          {message.role === "user" ? <div className="avatar user-avatar">Y</div> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg className="composer-mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Z"
+        fill="currentColor"
+      />
+      <path
+        d="M19 11v1a7 7 0 0 1-14 0v-1"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="2"
+      />
+      <path d="M12 18v3" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+      <path d="M8 21h8" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function StopRecordingIcon() {
+  return (
+    <svg className="composer-mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function DiscardRecordingIcon() {
+  return (
+    <svg className="composer-discard-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M18 6 6 18" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+      <path d="m6 6 12 12" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function TranscribingIcon() {
+  return (
+    <svg className="composer-mic-icon composer-spinner" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
+      <path
+        d="M12 3a9 9 0 0 1 9 9"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+
+function Composer(props: {
+  mode: ComposerMode;
+  disabled: boolean;
+  micDisabled: boolean;
+  phase: ComposerPhase;
+  recording: boolean;
+  onToggleRecord: () => void;
+  onDiscardRecording: () => void;
+}) {
+  if (props.mode === "blocked") {
+    return null;
+  }
+
+  const micButtonDisabled = props.disabled || props.micDisabled;
+
+  const micLabel =
+    props.phase === "transcribing"
+      ? "Speech transcribe ho rahi hai"
+      : props.phase === "waitingForRiva"
+        ? "Riva ka jawab aa raha hai"
+        : props.recording
+          ? "Recording band karein"
+          : "Boliye";
+
+  return (
+    <div className={`composer ${props.phase !== "idle" ? "composer-busy" : ""}`}>
+      <div className="composer-controls">
+        {props.recording ? (
+          <button
+            className="composer-discard"
+            type="button"
+            onClick={props.onDiscardRecording}
+            aria-label="Recording cancel karein"
+          >
+            <DiscardRecordingIcon />
+          </button>
+        ) : null}
+        <button
+          className={`primary composer-mic ${props.recording ? "recording" : ""} ${props.phase === "transcribing" ? "transcribing" : ""}`}
+          type="button"
+          onClick={props.onToggleRecord}
+          disabled={micButtonDisabled}
+          aria-pressed={props.recording}
+          aria-busy={props.phase !== "idle"}
+          aria-label={micLabel}
+        >
+          {props.recording ? (
+            <StopRecordingIcon />
+          ) : props.phase === "transcribing" ? (
+            <TranscribingIcon />
+          ) : (
+            <MicIcon />
+          )}
+        </button>
+      </div>
+      {props.phase === "transcribing" ? (
+        <span className="composer-status" aria-live="polite">
+          Transcribe ho raha hai...
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function cleanSpokenText(text: string) {
+  return stripUiInstructions(text).replace(/\s+/g, " ").trim();
+}
+
+function speakWithBrowserVoice(text: string) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return false;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-US";
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
+  return true;
+}
+
+async function api<T>(
+  path: string,
+  options: { method?: string; body?: unknown } = {},
+): Promise<T> {
+  const response = await fetch(path, {
+    method: options.method ?? "GET",
+    headers: options.body ? { "Content-Type": "application/json" } : undefined,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const payload = (await response.json()) as T & { error?: string };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Request failed.");
+  }
+
+  return payload;
+}
