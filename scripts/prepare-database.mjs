@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveUsePostgres } from "./resolve-db-provider.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const schemaPath = path.join(root, "prisma/schema.prisma");
@@ -40,38 +41,8 @@ function loadEnvFile(filename) {
   }
 }
 
-function resolveUsePostgres() {
-  loadEnvFile(".env");
-  loadEnvFile(".env.local");
-
-  const databaseUrl = process.env.DATABASE_URL ?? "";
-  const forcedProvider = process.env.PRISMA_PROVIDER?.trim().toLowerCase();
-  const onRailway = Boolean(process.env.RAILWAY_ENVIRONMENT);
-
-  if (forcedProvider === "postgresql" || forcedProvider === "postgres") {
-    return true;
-  }
-
-  if (forcedProvider === "sqlite") {
-    return false;
-  }
-
-  if (databaseUrl.startsWith("postgres://") || databaseUrl.startsWith("postgresql://")) {
-    return true;
-  }
-
-  if (databaseUrl.startsWith("file:")) {
-    return false;
-  }
-
-  // Railway builds should generate the PostgreSQL client even before DATABASE_URL
-  // is linked, so runtime adapter selection matches the generated client.
-  if (onRailway) {
-    return true;
-  }
-
-  return false;
-}
+loadEnvFile(".env");
+loadEnvFile(".env.local");
 
 const usePostgres = resolveUsePostgres();
 const source = usePostgres ? postgresTemplate : sqliteTemplate;
