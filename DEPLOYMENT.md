@@ -69,7 +69,7 @@ Copy from `.env.example` and set these in Railway → your service → **Variabl
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENROUTER_SITE_URL` | `http://localhost:3000` | Your public Railway URL (e.g. `https://rivatutor.up.railway.app`) |
+| `OPENROUTER_SITE_URL` | `http://localhost:3000` | Your public Railway URL (e.g. `https://rivatutor.up.railway.app`). **Optional:** if unset or still `localhost`, the app derives `https://<request-host>` from Railway proxy headers for OpenRouter `HTTP-Referer`. |
 | `OPENROUTER_APP_TITLE` | `Riva Teacher POC` | App name sent to OpenRouter |
 | `TTS_PROVIDER` | `openrouter` | `openrouter`, `vertex`, or `elevenlabs` |
 
@@ -177,6 +177,8 @@ npm start
 | Data disappears after deploy | You’re on ephemeral SQLite without a volume — switch to PostgreSQL. |
 | Prisma / DB errors on start | Ensure `DATABASE_URL` is set and Postgres service is running; check **Deploy Logs** for `releaseCommand` output. |
 | 502 / app not listening | Confirm `startCommand` is `npm start` and `PORT` is not overridden incorrectly. |
+| Voice / TTS silent in browser | Open DevTools → **Network** → filter `tts`. A `400` with `Insufficient credits` means add credits at [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits). `200` + `audio/L16` = PCM stream; `audio/mpeg` = MP3 fallback. Check console for `[riva-tts]` warnings. |
+| TTS works locally but not on Railway | Ensure `OPENROUTER_API_KEY` is set on Railway (not only in local `.env`). Set `OPENROUTER_SITE_URL` to your public URL or rely on auto-derived host headers. |
 
 ---
 

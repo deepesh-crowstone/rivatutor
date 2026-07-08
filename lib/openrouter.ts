@@ -1,5 +1,10 @@
 import type { z } from "zod";
-import { OPENROUTER_CHAT_MODEL, getOpenRouterConfig, requireOpenRouterApiKey } from "@/lib/env";
+import {
+  OPENROUTER_CHAT_MODEL,
+  getOpenRouterConfig,
+  requireOpenRouterApiKey,
+  resolveOpenRouterSiteUrlFromRequestContext,
+} from "@/lib/env";
 import { extractJsonObject } from "@/lib/json";
 
 type ChatMessage = {
@@ -53,12 +58,16 @@ export async function callOpenRouterJson<T>(
 export async function callOpenRouterText(
   messages: ChatMessage[],
   jsonMode = false,
+  request?: Request,
 ): Promise<string> {
   const apiKey = requireOpenRouterApiKey();
-  const config = getOpenRouterConfig();
+  const siteUrl = request
+    ? getOpenRouterConfig(request).siteUrl
+    : await resolveOpenRouterSiteUrlFromRequestContext();
+  const appTitle = getOpenRouterConfig(request).appTitle;
   const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: "POST",
-    headers: openRouterHeaders(apiKey, config.siteUrl, config.appTitle),
+    headers: openRouterHeaders(apiKey, siteUrl, appTitle),
     body: JSON.stringify({
       model: OPENROUTER_CHAT_MODEL,
       messages,

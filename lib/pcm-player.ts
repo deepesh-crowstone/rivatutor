@@ -36,6 +36,14 @@ export class PcmChunkPlayer {
     this.setPlaying(false);
   }
 
+  /** Call from a user gesture (e.g. mic click) so AudioContext can play on HTTPS. */
+  async prepareForPlayback(): Promise<void> {
+    const context = await this.ensureContext();
+    if (context.state === "suspended") {
+      await context.resume();
+    }
+  }
+
   async playResponse(response: Response): Promise<boolean> {
     const playGeneration = this.generation + 1;
     this.stop();
@@ -73,7 +81,8 @@ export class PcmChunkPlayer {
       this.remainder = new Uint8Array(0);
       await this.waitForScheduledAudio(context, playGeneration);
       return this.generation === playGeneration;
-    } catch {
+    } catch (error) {
+      console.warn("[riva-tts] PCM playback failed:", error);
       return false;
     } finally {
       if (this.generation === playGeneration) {

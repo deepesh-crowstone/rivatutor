@@ -9,10 +9,65 @@ function resolveTtsVoicePrompt(envValue: string | undefined): string {
   return trimmed || DEFAULT_TTS_VOICE_PROMPT;
 }
 
-export function getOpenRouterConfig() {
+const DEFAULT_OPENROUTER_SITE_URL = "http://localhost:3000";
+
+function isLocalhostSiteUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+function deriveSiteUrlFromHeaderSource(source: Request | Headers): string | null {
+  const getHeader = (name: string) =>
+    source instanceof Request ? source.headers.get(name) : source.get(name);
+
+  const forwardedHost = getHeader("x-forwarded-host");
+  const host = forwardedHost?.split(",")[0]?.trim() ?? getHeader("host")?.trim();
+  if (!host) {
+    return null;
+  }
+
+  const forwardedProto = getHeader("x-forwarded-proto")?.split(",")[0]?.trim();
+  const proto =
+    forwardedProto ??
+    (host.includes("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
+
+  return `${proto}://${host}`;
+}
+
+/** Prefer explicit env URL; otherwise derive from the incoming request host on Railway/production. */
+export function resolveOpenRouterSiteUrl(source?: Request | Headers): string {
+  const envUrl = process.env.OPENROUTER_SITE_URL?.trim();
+  if (envUrl && !isLocalhostSiteUrl(envUrl)) {
+    return envUrl;
+  }
+
+  if (source) {
+    const derived = deriveSiteUrlFromHeaderSource(source);
+    if (derived) {
+      return derived;
+    }
+  }
+
+  return envUrl || DEFAULT_OPENROUTER_SITE_URL;
+}
+
+export async function resolveOpenRouterSiteUrlFromRequestContext(): Promise<string> {
+  try {
+    const { headers } = await import("next/headers");
+    return resolveOpenRouterSiteUrl(await headers());
+  } catch {
+    return resolveOpenRouterSiteUrl();
+  }
+}
+
+export function getOpenRouterConfig(source?: Request | Headers) {
   return {
     apiKey: process.env.OPENROUTER_API_KEY ?? "",
-    siteUrl: process.env.OPENROUTER_SITE_URL ?? "http://localhost:3000",
+    siteUrl: resolveOpenRouterSiteUrl(source),
     appTitle: process.env.OPENROUTER_APP_TITLE ?? "Riva Teacher POC",
   };
 }

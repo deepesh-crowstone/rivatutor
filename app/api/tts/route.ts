@@ -6,14 +6,16 @@ export const runtime = "nodejs";
 
 const ttsSchema = z.object({
   text: z.string().trim().min(1).max(4000),
+  format: z.enum(["stream", "mp3", "wav"]).optional(),
 });
 
 export async function POST(request: Request) {
   try {
     const body = ttsSchema.parse(await request.json());
+    const format = body.format ?? (isStreamingTtsProvider() ? "stream" : "wav");
 
-    if (isStreamingTtsProvider()) {
-      const speech = await synthesizeSpeechStream(body.text);
+    if (format === "stream" && isStreamingTtsProvider()) {
+      const speech = await synthesizeSpeechStream(body.text, request);
 
       return new Response(speech.body, {
         headers: {
@@ -26,7 +28,10 @@ export async function POST(request: Request) {
       });
     }
 
-    const speech = await synthesizeSpeech(body.text);
+    const speech = await synthesizeSpeech(body.text, {
+      format: format === "mp3" ? "mp3" : "wav",
+      request,
+    });
 
     return new Response(speech.audio, {
       headers: {

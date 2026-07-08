@@ -159,6 +159,10 @@ export function RivaApp() {
     try {
       setError("");
       discardRecordingRef.current = false;
+      if (!pcmPlayerRef.current) {
+        pcmPlayerRef.current = new PcmChunkPlayer();
+      }
+      await pcmPlayerRef.current.prepareForPlayback();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       chunksRef.current = [];
@@ -276,16 +280,14 @@ export function RivaApp() {
     }
 
     try {
-      const response = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: spokenText }),
-      });
+      const response = await fetchTts(spokenText, "stream");
       if (playbackId !== ttsPlaybackIdRef.current) {
         return false;
       }
       if (!response.ok) {
-        return speakWithBrowserVoice(spokenText);
+        const errorMessage = await readTtsError(response);
+        console.warn("[riva-tts] API failed:", errorMessage);
+        return playTtsFallback(spokenText, playbackId, errorMessage);
       }
 
       if (isStreamingPcmResponse(response)) {
@@ -301,25 +303,98 @@ export function RivaApp() {
           return true;
         }
 
-        return speakWithBrowserVoice(spokenText);
+        console.warn("[riva-tts] PCM stream did not play; retrying with MP3.");
+        const mp3Response = await fetchTts(spokenText, "mp3");
+        if (playbackId !== ttsPlaybackIdRef.current) {
+          return false;
+        }
+        if (mp3Response.ok) {
+          const mp3Played = await playBlobAudio(mp3Response, playbackId);
+          if (mp3Played) {
+            return true;
+          }
+        } else {
+          const mp3Error = await readTtsError(mp3Response);
+          console.warn("[riva-tts] MP3 fallback failed:", mp3Error);
+        }
+
+        return playTtsFallback(spokenText, playbackId);
       }
 
-      const blob = await response.blob();
+      const played = await playBlobAudio(response, playbackId);
+      return played || playTtsFallback(spokenText, playbackId);
+    } catch (error) {
       if (playbackId !== ttsPlaybackIdRef.current) {
         return false;
       }
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-      };
-      await audio.play();
+      console.warn("[riva-tts] Playback error:", error);
+      return playTtsFallback(spokenText, playbackId);
+    }
+  }
+
+  async function playTtsFallback(
+    spokenText: string,
+    playbackId: number,
+    apiError?: string,
+  ): Promise<boolean> {
+    const usedBrowserVoice = speakWithBrowserVoice(spokenText);
+    if (usedBrowserVoice) {
+      if (apiError) {
+        console.warn("[riva-tts] Using browser voice fallback after API error.");
+      }
       return true;
+    }
+
+    if (apiError?.includes("Insufficient credits")) {
+      setError("Riva ki awaaz abhi band hai — OpenRouter credits khatam ho gaye hain.");
+    }
+
+    return false;
+  }
+
+  async function fetchTts(text: string, format: "stream" | "mp3" | "wav") {
+    return fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, format }),
+    });
+  }
+
+  async function readTtsError(response: Response) {
+    try {
+      const payload = (await response.clone().json()) as { error?: string };
+      return payload.error ?? `TTS request failed (${response.status})`;
     } catch {
-      if (playbackId !== ttsPlaybackIdRef.current) {
-        return false;
-      }
-      return speakWithBrowserVoice(spokenText);
+      return `TTS request failed (${response.status})`;
+    }
+  }
+
+  async function playBlobAudio(response: Response, playbackId: number) {
+    const blob = await response.blob();
+    if (playbackId !== ttsPlaybackIdRef.current) {
+      return false;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+
+    try {
+      await audio.play();
+      await new Promise<void>((resolve, reject) => {
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          resolve();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("Audio element playback failed."));
+        };
+      });
+      return true;
+    } catch (error) {
+      URL.revokeObjectURL(url);
+      console.warn("[riva-tts] Blob playback failed:", error);
+      return false;
     }
   }
 

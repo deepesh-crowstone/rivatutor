@@ -1,4 +1,9 @@
-import { getOpenRouterConfig, getOpenRouterTtsConfig, requireOpenRouterApiKey } from "@/lib/env";
+import {
+  getOpenRouterConfig,
+  getOpenRouterTtsConfig,
+  requireOpenRouterApiKey,
+  resolveOpenRouterSiteUrlFromRequestContext,
+} from "@/lib/env";
 import { OPENROUTER_PCM_CHANNELS, OPENROUTER_PCM_SAMPLE_RATE } from "@/lib/pcm";
 import { formatVertexTtsInput } from "@/lib/vertex-tts";
 
@@ -12,27 +17,54 @@ export type OpenRouterTtsStream = {
   channels: number;
 };
 
-export async function synthesizeSpeechStream(text: string): Promise<OpenRouterTtsStream> {
+export type OpenRouterTtsAudio = {
+  audio: ArrayBuffer;
+  contentType: string;
+};
+
+type OpenRouterSpeechFormat = "pcm" | "mp3";
+
+async function resolveSiteUrl(request?: Request): Promise<string> {
+  if (request) {
+    return getOpenRouterConfig(request).siteUrl;
+  }
+
+  return resolveOpenRouterSiteUrlFromRequestContext();
+}
+
+async function requestOpenRouterSpeech(
+  text: string,
+  responseFormat: OpenRouterSpeechFormat,
+  request?: Request,
+): Promise<Response> {
   const apiKey = requireOpenRouterApiKey();
-  const routerConfig = getOpenRouterConfig();
+  const routerConfig = getOpenRouterConfig(request);
   const ttsConfig = getOpenRouterTtsConfig();
   const input = formatVertexTtsInput(text, ttsConfig.voicePrompt);
+  const siteUrl = await resolveSiteUrl(request);
 
-  const response = await fetch(OPENROUTER_SPEECH_URL, {
+  return fetch(OPENROUTER_SPEECH_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": routerConfig.siteUrl,
+      "HTTP-Referer": siteUrl,
       "X-OpenRouter-Title": routerConfig.appTitle,
     },
     body: JSON.stringify({
       model: ttsConfig.model,
       input,
       voice: ttsConfig.voice,
-      response_format: "pcm",
+      response_format: responseFormat,
     }),
   });
+}
+
+export async function synthesizeSpeechStream(
+  text: string,
+  request?: Request,
+): Promise<OpenRouterTtsStream> {
+  const response = await requestOpenRouterSpeech(text, "pcm", request);
 
   if (!response.ok) {
     throw new Error(await openRouterTtsError(response));
@@ -46,6 +78,22 @@ export async function synthesizeSpeechStream(text: string): Promise<OpenRouterTt
     body: response.body,
     sampleRate: OPENROUTER_PCM_SAMPLE_RATE,
     channels: OPENROUTER_PCM_CHANNELS,
+  };
+}
+
+export async function synthesizeSpeechMp3(
+  text: string,
+  request?: Request,
+): Promise<OpenRouterTtsAudio> {
+  const response = await requestOpenRouterSpeech(text, "mp3", request);
+
+  if (!response.ok) {
+    throw new Error(await openRouterTtsError(response));
+  }
+
+  return {
+    audio: await response.arrayBuffer(),
+    contentType: response.headers.get("Content-Type") ?? "audio/mpeg",
   };
 }
 
