@@ -1,5 +1,5 @@
-// SQLite schema for local development (default).
-// Copied to schema.prisma when DATABASE_URL is not a Postgres connection string.
+// PostgreSQL schema for Railway / production deployments.
+// Selected automatically when DATABASE_URL starts with postgres:// or postgresql://
 
 generator client {
   provider = "prisma-client"
@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model LearnerProfile {

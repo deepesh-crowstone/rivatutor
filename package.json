@@ -5,14 +5,17 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/prepare-database.mjs && prisma generate && next build",
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:push": "prisma db push",
-    "db:generate": "prisma generate",
-    "postinstall": "prisma generate"
+    "db:push": "node scripts/prepare-database.mjs && prisma db push",
+    "db:generate": "node scripts/prepare-database.mjs && prisma generate",
+    "postinstall": "node scripts/prepare-database.mjs && prisma generate"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "keywords": [],
   "author": "",
@@ -20,8 +23,10 @@
   "type": "module",
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "better-sqlite3": "^12.11.1",
+    "pg": "^8.16.3",
     "next": "^16.2.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -29,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
+    "@types/pg": "^8.15.5",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",

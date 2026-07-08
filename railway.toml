@@ -1,0 +1,13 @@
+# Railway deployment config for Riva Teacher (Next.js + Prisma)
+# Docs: https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "nixpacks"
+buildCommand = "npm run build"
+
+[deploy]
+# Apply Prisma schema after build, before the app starts (uses runtime DATABASE_URL).
+releaseCommand = "node scripts/prepare-database.mjs && npx prisma db push --skip-generate"
+startCommand = "npm start"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
