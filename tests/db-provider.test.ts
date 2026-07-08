@@ -29,7 +29,7 @@ describe("resolveUsePostgres", () => {
   it("defaults to postgres on Railway when DATABASE_URL is missing", () => {
     expect(
       resolveUsePostgres({
-        RAILWAY_ENVIRONMENT: "production",
+        RAILWAY_ENVIRONMENT_NAME: "production",
       } as NodeJS.ProcessEnv),
     ).toBe(true);
   });
