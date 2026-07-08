@@ -8,6 +8,7 @@ import { buildAssistantSpeechSegments } from "@/lib/assistant-speech";
 import { sanitizeQuestionStepIntroReply } from "@/lib/lesson-delivery";
 import { deriveComposerState, type ComposerMode, type RecordingTarget } from "@/lib/composer-mode";
 import { isStreamingPcmResponse, PcmChunkPlayer } from "@/lib/pcm-player";
+import { TtsSessionTracker } from "@/lib/tts-session";
 import { parseUsernameInput } from "@/lib/username-rules";
 type ComposerPhase = "idle" | "transcribing" | "waitingForRiva";
 
@@ -37,7 +38,9 @@ export function RivaApp() {
   const discardRecordingRef = useRef(false);
   const lastSpokenIdRef = useRef<string | null>(null);
   const pcmPlayerRef = useRef<PcmChunkPlayer | null>(null);
-  const ttsPlaybackIdRef = useRef(0);
+  const ttsSessionRef = useRef(new TtsSessionTracker());
+  const ttsAbortControllerRef = useRef<AbortController | null>(null);
+  const blobAudioRef = useRef<HTMLAudioElement | null>(null);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
 
   const pendingTopics = useMemo(
@@ -56,6 +59,7 @@ export function RivaApp() {
   }
 
   async function submitUsernameAnswer(rawUsername: string) {
+    abortTtsPlayback();
     const username = parseUsernameInput(rawUsername);
     setState(await api("/api/session/username", { method: "POST", body: { username } }));
     return true;
@@ -72,6 +76,7 @@ export function RivaApp() {
   }
 
   async function selectLevel(level: string) {
+    abortTtsPlayback();
     await run("Aapka level save ho raha hai...", async () => {
       setState(await api("/api/onboarding", { method: "POST", body: { answer: level } }));
     });
@@ -88,6 +93,7 @@ export function RivaApp() {
   }
 
   async function selectTopic(topicId: string) {
+    abortTtsPlayback();
     await run("Lesson plan ban raha hai...", async () => {
       setState(await api("/api/topics/select", { method: "POST", body: { topicId } }));
     });
@@ -136,11 +142,32 @@ export function RivaApp() {
   }
 
   async function reset() {
+    abortTtsPlayback();
     await run("Sign out ho rahe hain...", async () => {
       const nextState = await api<AppState>("/api/session", { method: "DELETE" });
       setState(nextState);
       lastSpokenIdRef.current = null;
     });
+  }
+
+  function abortTtsPlayback() {
+    ttsSessionRef.current.abort();
+    ttsAbortControllerRef.current?.abort();
+    ttsAbortControllerRef.current = null;
+    pcmPlayerRef.current?.stop();
+    window.speechSynthesis?.cancel();
+    stopBlobAudio();
+  }
+
+  function stopBlobAudio() {
+    if (!blobAudioRef.current) {
+      return;
+    }
+
+    blobAudioRef.current.pause();
+    blobAudioRef.current.removeAttribute("src");
+    blobAudioRef.current.load();
+    blobAudioRef.current = null;
   }
 
   async function run(label: string, action: () => Promise<void>) {
@@ -157,6 +184,7 @@ export function RivaApp() {
 
   async function startRecording(target: RecordingTarget) {
     try {
+      abortTtsPlayback();
       setError("");
       discardRecordingRef.current = false;
       if (!pcmPlayerRef.current) {
@@ -257,37 +285,55 @@ export function RivaApp() {
     }
   }
 
-  async function speakAssistantMessage(message: ChatMessageDto) {
+  async function speakAssistantMessage(message: ChatMessageDto): Promise<boolean> {
+    const sessionId = ttsSessionRef.current.currentSessionId();
     const segments = buildAssistantSpeechSegments(message);
+
     for (const segment of segments) {
-      await playTts(segment);
+      if (!ttsSessionRef.current.isSessionActive(sessionId)) {
+        return false;
+      }
+
+      const played = await playTts(segment, sessionId);
+      if (!played) {
+        return false;
+      }
     }
+
+    return ttsSessionRef.current.isSessionActive(sessionId);
   }
 
-  async function playTts(text: string) {
-    const spokenText = cleanSpokenText(text);
-    if (!spokenText) {
+  async function playTts(text: string, sessionId: number): Promise<boolean> {
+    if (!ttsSessionRef.current.isSessionActive(sessionId)) {
       return false;
     }
 
-    const playbackId = ttsPlaybackIdRef.current + 1;
-    ttsPlaybackIdRef.current = playbackId;
-    pcmPlayerRef.current?.stop();
-    window.speechSynthesis?.cancel();
-
-    if (state?.missingApiKey) {
-      return speakWithBrowserVoice(spokenText);
+    const spokenText = cleanSpokenText(text);
+    if (!spokenText) {
+      return true;
     }
 
+    const { segmentId } = ttsSessionRef.current.beginSegment();
+    pcmPlayerRef.current?.stop();
+    window.speechSynthesis?.cancel();
+    stopBlobAudio();
+
+    if (state?.missingApiKey) {
+      return speakWithBrowserVoice(spokenText, sessionId, segmentId);
+    }
+
+    const controller = new AbortController();
+    ttsAbortControllerRef.current = controller;
+
     try {
-      const response = await fetchTts(spokenText, "stream");
-      if (playbackId !== ttsPlaybackIdRef.current) {
+      const response = await fetchTts(spokenText, "stream", controller.signal);
+      if (!ttsSessionRef.current.isPlaybackActive(sessionId, segmentId)) {
         return false;
       }
       if (!response.ok) {
         const errorMessage = await readTtsError(response);
         console.warn("[riva-tts] API failed:", errorMessage);
-        return playTtsFallback(spokenText, playbackId, errorMessage);
+        return playTtsFallback(spokenText, sessionId, segmentId, errorMessage);
       }
 
       if (isStreamingPcmResponse(response)) {
@@ -296,7 +342,7 @@ export function RivaApp() {
         }
 
         const played = await pcmPlayerRef.current.playResponse(response);
-        if (playbackId !== ttsPlaybackIdRef.current) {
+        if (!ttsSessionRef.current.isPlaybackActive(sessionId, segmentId)) {
           return false;
         }
         if (played) {
@@ -304,12 +350,12 @@ export function RivaApp() {
         }
 
         console.warn("[riva-tts] PCM stream did not play; retrying with MP3.");
-        const mp3Response = await fetchTts(spokenText, "mp3");
-        if (playbackId !== ttsPlaybackIdRef.current) {
+        const mp3Response = await fetchTts(spokenText, "mp3", controller.signal);
+        if (!ttsSessionRef.current.isPlaybackActive(sessionId, segmentId)) {
           return false;
         }
         if (mp3Response.ok) {
-          const mp3Played = await playBlobAudio(mp3Response, playbackId);
+          const mp3Played = await playBlobAudio(mp3Response, sessionId, segmentId);
           if (mp3Played) {
             return true;
           }
@@ -318,26 +364,38 @@ export function RivaApp() {
           console.warn("[riva-tts] MP3 fallback failed:", mp3Error);
         }
 
-        return playTtsFallback(spokenText, playbackId);
+        return playTtsFallback(spokenText, sessionId, segmentId);
       }
 
-      const played = await playBlobAudio(response, playbackId);
-      return played || playTtsFallback(spokenText, playbackId);
+      const played = await playBlobAudio(response, sessionId, segmentId);
+      return played || playTtsFallback(spokenText, sessionId, segmentId);
     } catch (error) {
-      if (playbackId !== ttsPlaybackIdRef.current) {
+      if (isTtsAbortError(error)) {
+        return false;
+      }
+      if (!ttsSessionRef.current.isSessionActive(sessionId)) {
         return false;
       }
       console.warn("[riva-tts] Playback error:", error);
-      return playTtsFallback(spokenText, playbackId);
+      return playTtsFallback(spokenText, sessionId, segmentId);
+    } finally {
+      if (ttsAbortControllerRef.current === controller) {
+        ttsAbortControllerRef.current = null;
+      }
     }
   }
 
   async function playTtsFallback(
     spokenText: string,
-    playbackId: number,
+    sessionId: number,
+    segmentId: number,
     apiError?: string,
   ): Promise<boolean> {
-    const usedBrowserVoice = speakWithBrowserVoice(spokenText);
+    if (!ttsSessionRef.current.isPlaybackActive(sessionId, segmentId)) {
+      return false;
+    }
+
+    const usedBrowserVoice = speakWithBrowserVoice(spokenText, sessionId, segmentId);
     if (usedBrowserVoice) {
       if (apiError) {
         console.warn("[riva-tts] Using browser voice fallback after API error.");
@@ -352,11 +410,12 @@ export function RivaApp() {
     return false;
   }
 
-  async function fetchTts(text: string, format: "stream" | "mp3" | "wav") {
+  async function fetchTts(text: string, format: "stream" | "mp3" | "wav", signal?: AbortSignal) {
     return fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, format }),
+      signal,
     });
   }
 
@@ -369,33 +428,68 @@ export function RivaApp() {
     }
   }
 
-  async function playBlobAudio(response: Response, playbackId: number) {
+  async function playBlobAudio(response: Response, sessionId: number, segmentId: number) {
     const blob = await response.blob();
-    if (playbackId !== ttsPlaybackIdRef.current) {
+    if (!ttsSessionRef.current.isPlaybackActive(sessionId, segmentId)) {
       return false;
     }
 
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
+    blobAudioRef.current = audio;
 
     try {
       await audio.play();
+      if (!ttsSessionRef.current.isPlaybackActive(sessionId, segmentId)) {
+        audio.pause();
+        URL.revokeObjectURL(url);
+        return false;
+      }
+
       await new Promise<void>((resolve, reject) => {
         audio.onended = () => {
           URL.revokeObjectURL(url);
+          if (blobAudioRef.current === audio) {
+            blobAudioRef.current = null;
+          }
           resolve();
         };
         audio.onerror = () => {
           URL.revokeObjectURL(url);
+          if (blobAudioRef.current === audio) {
+            blobAudioRef.current = null;
+          }
           reject(new Error("Audio element playback failed."));
         };
       });
-      return true;
+      return ttsSessionRef.current.isPlaybackActive(sessionId, segmentId);
     } catch (error) {
       URL.revokeObjectURL(url);
+      if (blobAudioRef.current === audio) {
+        blobAudioRef.current = null;
+      }
       console.warn("[riva-tts] Blob playback failed:", error);
       return false;
     }
+  }
+
+  function speakWithBrowserVoice(text: string, sessionId: number, segmentId: number) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      return false;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    utterance.rate = 0.95;
+    utterance.pitch = 1;
+    utterance.onend = () => {
+      if (!ttsSessionRef.current.isPlaybackActive(sessionId, segmentId)) {
+        window.speechSynthesis.cancel();
+      }
+    };
+    window.speechSynthesis.speak(utterance);
+    return true;
   }
 
   const displayMessages = useMemo(() => {
@@ -457,7 +551,10 @@ export function RivaApp() {
 
     void (async () => {
       for (const message of pendingAssistantMessages) {
-        await speakAssistantMessage(message);
+        const completed = await speakAssistantMessage(message);
+        if (!completed) {
+          break;
+        }
         lastSpokenIdRef.current = message.id;
       }
     })();
@@ -908,18 +1005,8 @@ function cleanSpokenText(text: string) {
   return stripUiInstructions(text).replace(/\s+/g, " ").trim();
 }
 
-function speakWithBrowserVoice(text: string) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-    return false;
-  }
-
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-US";
-  utterance.rate = 0.95;
-  utterance.pitch = 1;
-  window.speechSynthesis.speak(utterance);
-  return true;
+function isTtsAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 async function api<T>(
