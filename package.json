@@ -8,7 +8,7 @@
     "build": "node scripts/prepare-database.mjs && prisma generate && next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "node scripts/prepare-database.mjs && prisma generate && vitest run",
     "test:watch": "vitest",
     "db:push": "node scripts/prepare-database.mjs && prisma db push",
     "db:generate": "node scripts/prepare-database.mjs && prisma generate",

@@ -117,17 +117,28 @@ Railway detects Next.js via Nixpacks. This repo includes `railway.toml`:
 | Phase | Command |
 |-------|---------|
 | **Install** | `npm install` → `postinstall` runs `prepare-database` + `prisma generate` |
-| **Build** | `npm run build` → selects DB schema, generates Prisma client, `next build` |
+| **Build** | `npm run build` → selects DB schema (reads `.env` + Railway env), generates Prisma client, `next build` |
 | **Release** | `node scripts/prepare-database.mjs && npx prisma db push --skip-generate` |
 | **Start** | `npm start` → `next start` (binds to `PORT`) |
 
-Node.js **20+** is required (`engines` in `package.json`).
+Node.js **20+** is required (`engines` in `package.json`). `railway.toml` sets `NIXPACKS_NODE_VERSION=20` and `PRISMA_PROVIDER=postgresql` so the build generates a PostgreSQL Prisma client even before `DATABASE_URL` is linked.
 
 ### Manual redeploy
 
 Push to the connected GitHub branch, or click **Deploy** in Railway.
 
 ### Verify locally (production build)
+
+Simulate Railway (no secrets required at build time):
+
+```bash
+rm -rf .next generated node_modules
+npm ci
+env -i PATH="$PATH" HOME="$HOME" RAILWAY_ENVIRONMENT=production PRISMA_PROVIDER=postgresql npm run build
+npm start
+```
+
+With API keys for full runtime:
 
 ```bash
 cp .env.example .env   # fill in keys
@@ -151,7 +162,8 @@ npm start
 | Issue | Fix |
 |-------|-----|
 | Build fails on `better-sqlite3` | Prefer PostgreSQL on Railway; or retry deploy (Nixpacks needs native build tools). |
-| `OPENROUTER_API_KEY is required` | Set the variable in Railway and redeploy. |
+| Build fails with Prisma adapter/provider mismatch | Ensure `prepare-database` and runtime use the same provider. On Railway, `PRISMA_PROVIDER=postgresql` is set in `railway.toml`. Locally, set `DATABASE_URL` in `.env` before `npm run build`, or export `PRISMA_PROVIDER`. |
+| `OPENROUTER_API_KEY is required` | Set the variable in Railway and redeploy. This should only appear at **runtime** in API routes, not during `next build`. |
 | `ELEVENLABS_API_KEY is required` | Set the variable in Railway and redeploy. |
 | Data disappears after deploy | You’re on ephemeral SQLite without a volume — switch to PostgreSQL. |
 | Prisma / DB errors on start | Ensure `DATABASE_URL` is set and Postgres service is running; check **Deploy Logs** for `releaseCommand` output. |

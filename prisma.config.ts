@@ -9,6 +9,7 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Prisma generate must not require a live database URL during CI/Railway builds.
+    url: process.env["DATABASE_URL"] ?? "file:./dev.db",
   },
 });

@@ -5,6 +5,11 @@
 builder = "nixpacks"
 buildCommand = "npm run build"
 
+[build.env]
+NIXPACKS_NODE_VERSION = "20"
+# Ensure build-time Prisma client matches Railway PostgreSQL runtime.
+PRISMA_PROVIDER = "postgresql"
+
 [deploy]
 # Apply Prisma schema after build, before the app starts (uses runtime DATABASE_URL).
 releaseCommand = "node scripts/prepare-database.mjs && npx prisma db push --skip-generate"
