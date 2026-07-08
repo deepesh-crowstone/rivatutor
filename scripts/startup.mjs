@@ -89,7 +89,7 @@ async function main() {
 
   if (usePostgres && databaseUrl) {
     console.log("[startup] Applying Prisma schema with prisma db push...");
-    await run("npx", ["prisma", "db", "push", "--skip-generate"]);
+    await run("npx", ["prisma", "db", "push"]);
     console.log("[startup] Database schema is up to date.");
   } else if (usePostgres) {
     console.warn("[startup] Skipping prisma db push because DATABASE_URL is not set.");

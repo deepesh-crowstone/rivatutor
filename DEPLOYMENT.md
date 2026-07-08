@@ -125,7 +125,7 @@ Railway detects Next.js via Nixpacks. This repo includes `railway.toml`:
 |-------|---------|
 | **Install** | `npm install` → `postinstall` runs `prepare-database` + `prisma generate` |
 | **Build** | `npm run build` → selects DB schema (reads `.env` + Railway env), generates Prisma client, `next build` |
-| **Release** | `node scripts/prepare-database.mjs && npx prisma db push --skip-generate` |
+| **Release** | `node scripts/prepare-database.mjs && npx prisma db push` |
 | **Start** | `npm start` → `scripts/startup.mjs` logs provider/DB URL, runs `db push` again (idempotent), then `next start` |
 | **Health** | `GET /api/health` — returns `{ ok, provider, database }`; configured as Railway health check |
 
