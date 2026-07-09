@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  fallbackOpenEndedAdvance,
   intentQuestionAfterLevel,
+  loadingLabel,
   topicChangeAckWithTitle,
   topicChangeClarifyMessage,
   topicCompleteMessage,
@@ -41,5 +43,13 @@ describe("cefr-copy other hardcoded flows", () => {
     expect(topicChangeAckWithTitle("Travel", "C1")).toContain("Alright");
     expect(topicCompleteMessage("C1")).toContain("That topic's done");
     expect(topicCompleteMessage("A1")).toContain("Topic complete ho gaya");
+  });
+
+  it("uses English-only loading and fallback copy for C1–C2", () => {
+    expect(loadingLabel("lessonPlan", "C1")).toBe("Building your lesson plan...");
+    expect(loadingLabel("thinking", "C2")).toBe("Riva is thinking...");
+    expect(loadingLabel("lessonPlan", "A2")).toContain("ban raha");
+    expect(fallbackOpenEndedAdvance("C1")).toBe("Nice answer — let's keep going.");
+    expect(fallbackOpenEndedAdvance("A2")).toContain("Achha jawab");
   });
 });

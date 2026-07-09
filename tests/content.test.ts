@@ -4,9 +4,11 @@ import {
   getHinglishCompositionRule,
   getLessonPlanStructurePrompt,
   isContinueAdvancePhrase,
+  isEnglishOnlyLevel,
   resolveHinglishCompositionBand,
   RIVA_GRAMMAR_RULE,
   RIVA_LANGUAGE_RULE,
+  RIVA_LANGUAGE_RULE_ENGLISH_ONLY,
   stripUiInstructions,
 } from "@/lib/content";
 
@@ -36,13 +38,23 @@ describe("CEFR Hinglish composition", () => {
   it("returns band-specific composition rules", () => {
     expect(getHinglishCompositionRule("A1")).toContain("support-heavy");
     expect(getHinglishCompositionRule("B1")).toContain("balanced");
-    expect(getHinglishCompositionRule("C1")).toContain("English-leaning");
+    expect(getHinglishCompositionRule("C1")).toContain("English only");
   });
 
   it("combines base language rule with CEFR mix in prompt helper", () => {
     const block = formatLanguageRulesForPrompt("B2");
     expect(block).toContain(RIVA_LANGUAGE_RULE);
     expect(block).toContain("balanced");
+  });
+
+  it("uses English-only language rules for C1–C2 with no Hinglish allowance", () => {
+    expect(isEnglishOnlyLevel("C1")).toBe(true);
+    expect(isEnglishOnlyLevel("A2")).toBe(false);
+    const block = formatLanguageRulesForPrompt("C1");
+    expect(block).toContain(RIVA_LANGUAGE_RULE_ENGLISH_ONLY);
+    expect(block).not.toContain(RIVA_LANGUAGE_RULE);
+    expect(getHinglishCompositionRule("C2")).toContain("English only");
+    expect(getHinglishCompositionRule("C2")).toContain("no Hindi");
   });
 
   it("describes open_ended-only structure for C1–C2 lesson plans", () => {

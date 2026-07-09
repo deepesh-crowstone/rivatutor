@@ -128,9 +128,9 @@ Write all explanations, questions (in prose), feedback, encouragement, and CTAs 
 | ---- | ------ | ------------------- |
 | `support_heavy` | A1–A2 | Mostly Roman Hindi; short/simple; English only for taught phrases |
 | `balanced` | B1–B2 | ~50/50 Hinglish; longer sentences OK |
-| `english_leaning` | C1–C2 | Mostly English; light Hindi for warmth only |
+| `english_leaning` | C1–C2 | **English only** — no Hindi/Hinglish at all |
 
-Unknown/missing level defaults to **A2** (`support_heavy`). SAR `expectedAnswer` / model sentences stay English at every level.
+Unknown/missing level defaults to **A2** (`support_heavy`). SAR `expectedAnswer` / model sentences stay English at every level. For C1–C2, `formatLanguageRulesForPrompt` uses `RIVA_LANGUAGE_RULE_ENGLISH_ONLY` (not the Hinglish base rule).
 
 **Language split:**
 

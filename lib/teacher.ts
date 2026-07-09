@@ -923,6 +923,7 @@ async function deliverStepTurn(input: {
       turnKind: input.turnKind,
       nextStep,
       sarGrading: input.sarGrading,
+      level: input.topic.learner.selfDeclaredLevel,
     });
 
     return {

@@ -11,9 +11,17 @@ export const SAR_QUESTION_PROMPT = "Is sentence ko repeat karein:";
 export const RIVA_LANGUAGE_RULE =
   "Write all explanations, questions (in prose), feedback, encouragement, and CTAs in natural Hinglish (Roman script, warm Indian classroom tone). Keep phrases to repeat, SAR expectedAnswer, and model English sentences in English only — but only on SAR question steps, never on concept/practice spoken intros. QUESTION card prompts are shown in the UI — the deliverer must not duplicate English question text in spoken_reply for question steps.";
 
+/** Language rule for C1–C2 — English only, no Hindi/Hinglish. */
+export const RIVA_LANGUAGE_RULE_ENGLISH_ONLY =
+  "Write ALL explanations, questions (in prose), feedback, encouragement, CTAs, topic titles, and acknowledgments in clear natural English only. Do NOT use Hindi or Hinglish at all — no Roman Hindi, no code-switching, no Hindi filler words (e.g. bahut, chaliye, theek, aap, mein, hai). Keep SAR expectedAnswer and model sentences in English only. QUESTION card prompts are shown in the UI — the deliverer must not duplicate English question text in spoken_reply for question steps.";
+
 /** Grammar teaching rule — explain WHY English works, not just what to say. */
 export const RIVA_GRAMMAR_RULE =
   "Teach underlying English grammar, not just phrases. On concept and practice steps, include 1–2 short Hinglish grammar notes in step content (why the pattern works: tense, word order, subject–verb, polite forms, articles, prepositions, question structure). Keep notes spoken-friendly — one or two sentences, not textbook walls. Connect each rule to the learner's topic context (airport, travel, office, etc.). English only for example phrases; grammar labels may use Roman Hindi/English mix (verb, subject, tense). Match depth to CEFR: A1–A2 = simpler patterns; B1+ = slightly richer structure. Do NOT preview SAR target sentences on concept steps — explain the pattern without quoting the exact sentence the learner will repeat next.";
+
+/** Grammar rule for C1–C2 — English-only notes. */
+export const RIVA_GRAMMAR_RULE_ENGLISH_ONLY =
+  "Teach underlying English grammar and discourse strategy, not just phrases. On concept and practice steps, include 1–2 short English grammar or register notes in step content (why the pattern works: tense, word order, hedging, politeness, articles, prepositions, question structure, persuasion). Keep notes spoken-friendly — one or two sentences, not textbook walls. Connect each rule to the learner's topic context. Do NOT use Hindi or Hinglish. Do NOT preview SAR target sentences on concept steps.";
 
 export type HinglishCompositionBand = "support_heavy" | "balanced" | "english_leaning";
 
@@ -31,25 +39,46 @@ export function resolveHinglishCompositionBand(level?: string | null): HinglishC
   return "english_leaning";
 }
 
+/** True for C1–C2 — Riva must not use any Hinglish. */
+export function isEnglishOnlyLevel(level?: string | null): boolean {
+  return resolveHinglishCompositionBand(level) === "english_leaning";
+}
+
 const HINGLISH_COMPOSITION_RULES: Record<HinglishCompositionBand, string> = {
   support_heavy:
     "CEFR Hinglish mix (A1–A2, support-heavy): Speak mostly Roman Hindi for instructions, setup, feedback, and encouragement. Keep sentences short and simple. Use English only for SAR target phrases / model sentences being taught. Prefer high-frequency words; avoid long English explanations.",
   balanced:
     "CEFR Hinglish mix (B1–B2, balanced): Use a natural ~50/50 Hinglish mix — Hindi scaffolding with more English words in instructions is fine. Sentences may be longer. Still keep SAR expectedAnswer and model phrases in English only. Warm classroom tone.",
   english_leaning:
-    "CEFR Hinglish mix (C1–C2, English-leaning): Teach mostly in clear English. Use light Roman Hindi only for warmth, encouragement, or brief transitions. Richer vocabulary and nuance are OK. SAR expectedAnswer and model phrases stay English only.",
+    "CEFR language (C1–C2, English only): Speak and write in clear natural English only. Absolutely no Hindi, no Hinglish, and no Roman Hindi words. Richer vocabulary and nuance are OK.",
 };
 
-/** Level-specific Hinglish composition rule for LLM prompts. */
+/** Level-specific language composition rule for LLM prompts. */
 export function getHinglishCompositionRule(level?: string | null): string {
   return HINGLISH_COMPOSITION_RULES[resolveHinglishCompositionBand(level)];
 }
 
-/** Shared language block: base Hinglish rule + CEFR mix for the learner's level. */
+/** Shared language block for the learner's CEFR level. */
 export function formatLanguageRulesForPrompt(level?: string | null): string {
+  if (isEnglishOnlyLevel(level)) {
+    return `${RIVA_LANGUAGE_RULE_ENGLISH_ONLY}\n${getHinglishCompositionRule(level)}`;
+  }
   return `${RIVA_LANGUAGE_RULE}\n${getHinglishCompositionRule(level)}`;
 }
 
+/** Grammar rule matched to CEFR language mode. */
+export function formatGrammarRuleForPrompt(level?: string | null): string {
+  return isEnglishOnlyLevel(level) ? RIVA_GRAMMAR_RULE_ENGLISH_ONLY : RIVA_GRAMMAR_RULE;
+}
+
+/** Extra deliverer guidance so C1–C2 never slip into Hinglish despite older prompt examples. */
+export function getDelivererLanguageOverride(level?: string | null): string {
+  if (!isEnglishOnlyLevel(level)) {
+    return "Every `spoken_reply` must match the CEFR Hinglish mix above (Hinglish for A1–B2).";
+  }
+
+  return `CRITICAL — C1/C2 ENGLISH ONLY: Every \`spoken_reply\` must be clear English with zero Hindi/Hinglish. Do not use Roman Hindi words (bahut, chaliye, theek, aap, mein, hai, karein, etc.). Ignore any Hinglish examples elsewhere in this prompt; rewrite them in English. Open-ended step_intro example: "Let's try a real scenario." Feedback example: "Nice work — that sounded natural. Let's keep going."`;
+}
 /** Prompt section describing CEFR-specific lesson structure and question mix. */
 export function getLessonPlanStructurePrompt(level?: string | null): string {
   const mix = getLessonPlanQuestionMix(level);

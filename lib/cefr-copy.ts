@@ -79,6 +79,84 @@ export function topicCompleteMessage(level?: string | null): string {
   });
 }
 
+/** Transient UI loading labels (composer / stage). */
+export function loadingLabel(
+  kind: "session" | "level" | "lessonPlan" | "signIn" | "transcribing" | "thinking",
+  level?: string | null,
+): string {
+  const english = resolveHinglishCompositionBand(level) === "english_leaning";
+  if (english) {
+    switch (kind) {
+      case "session":
+        return "Loading Riva...";
+      case "level":
+        return "Saving your level...";
+      case "lessonPlan":
+        return "Building your lesson plan...";
+      case "signIn":
+        return "Signing you in...";
+      case "transcribing":
+        return "Transcribing...";
+      case "thinking":
+        return "Riva is thinking...";
+    }
+  }
+
+  switch (kind) {
+    case "session":
+      return "Riva load ho rahi hai...";
+    case "level":
+      return "Aapka level save ho raha hai...";
+    case "lessonPlan":
+      return "Lesson plan ban raha hai...";
+    case "signIn":
+      return "Sign in ho rahe hain...";
+    case "transcribing":
+      return "Transcribe ho raha hai...";
+    case "thinking":
+      return "Riva soch rahi hai...";
+  }
+}
+
+/** Fallback spoken feedback when LLM delivery fails. */
+export function fallbackSarPassFeedback(
+  correctCount: number,
+  expectedCount: number,
+  level?: string | null,
+): string {
+  if (resolveHinglishCompositionBand(level) === "english_leaning") {
+    return `Nice — that sounded clear. ${correctCount} of ${expectedCount} key words matched.`;
+  }
+  return `Bahut badhiya! Bilkul sahi bola. ${correctCount} mein se ${expectedCount} words match hue.`;
+}
+
+export function fallbackSarRetryFeedback(
+  correctCount: number,
+  expectedCount: number,
+  level?: string | null,
+): string {
+  if (resolveHinglishCompositionBand(level) === "english_leaning") {
+    return `Good try. ${correctCount} of ${expectedCount} key words matched. Let's try that once more.`;
+  }
+  return `Achha try tha. ${correctCount} mein se ${expectedCount} words match hue. Phir se ek baar repeat karein.`;
+}
+
+export function fallbackOpenEndedAdvance(level?: string | null): string {
+  return pick(level, {
+    support_heavy: "Achha jawab! Chaliye aage badhte hain.",
+    balanced: "Achha jawab! Chaliye aage badhte hain.",
+    english_leaning: "Nice answer — let's keep going.",
+  });
+}
+
+export function fallbackGenericAdvance(level?: string | null): string {
+  return pick(level, {
+    support_heavy: "Bahut badhiya! Chaliye aage badhte hain.",
+    balanced: "Bahut badhiya! Chaliye aage badhte hain.",
+    english_leaning: "Great — let's move on.",
+  });
+}
+
 /** Returning-user welcome (parts joined with spaces). */
 export function buildWelcomeBackMessageForLevel(learner: {
   name: string | null;

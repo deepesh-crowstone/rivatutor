@@ -16,10 +16,12 @@ import {
   type TopicChangeIntentResult,
 } from "@/lib/domain";
 import {
+  formatGrammarRuleForPrompt,
   formatLanguageRulesForPrompt,
+  getDelivererLanguageOverride,
   getLessonPlanStructurePrompt,
+  isEnglishOnlyLevel,
   RIVA_DELIVERY_RULE,
-  RIVA_GRAMMAR_RULE,
 } from "@/lib/content";
 import { formatLessonPlanForPrompt } from "@/lib/lesson-delivery";
 import { callOpenRouterJson } from "@/lib/openrouter";
@@ -32,13 +34,17 @@ export async function judgeIntentClarity(input: {
   learnerContext?: LearnerContextInput;
 }): Promise<IntentClarityResult> {
   const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {});
-  const languageRules = formatLanguageRulesForPrompt(input.learnerContext?.selfDeclaredLevel);
+  const level = input.learnerContext?.selfDeclaredLevel;
+  const languageRules = formatLanguageRulesForPrompt(level);
+  const followUpExample = isEnglishOnlyLevel(level)
+    ? "a short friendly English follow-up question"
+    : "ek chhota friendly Hinglish follow-up sawaal";
   return callOpenRouterJson(
     [
       {
         role: "system",
         content:
-          `You are Riva's Intent Clarity Judge. Decide if the learner's reason for learning spoken English is specific enough to personalize a curriculum. Clear means you can name real situations such as interviews, work meetings, travel, client calls, presentations, daily conversation, or exams. ${RIVA_DELIVERY_RULE} ${languageRules} Follow-up questions must be spoken questions only, matching the CEFR Hinglish mix. Return only JSON.${contextBlock}`,
+          `You are Riva's Intent Clarity Judge. Decide if the learner's reason for learning spoken English is specific enough to personalize a curriculum. Clear means you can name real situations such as interviews, work meetings, travel, client calls, presentations, daily conversation, or exams. ${RIVA_DELIVERY_RULE} ${languageRules} Follow-up questions must be spoken questions only, matching the CEFR language rule. Return only JSON.${contextBlock}`,
       },
       {
         role: "user",
@@ -63,7 +69,7 @@ Return JSON in this shape:
 If not clear and probe count is below 2, return:
 {
   "clear": false,
-  "follow_up_question": "ek chhota friendly Hinglish follow-up sawaal"
+  "follow_up_question": "${followUpExample}"
 }
 
 If not clear but probe count is already 2, set clear true and create the best-effort structured_intent from available context.`,
@@ -87,7 +93,7 @@ export async function planCurriculum(input: {
       {
         role: "system",
         content:
-          `You are Riva's Curriculum Planner. Create an ordered spoken-English curriculum that moves from foundational comfort to the learner's target situations. ${RIVA_DELIVERY_RULE} ${languageRules} Topic titles and descriptions should match the CEFR Hinglish mix (Hinglish/bilingual for A1–B2; clearer English titles OK for C1–C2). Return only JSON.${contextBlock}`,
+          `You are Riva's Curriculum Planner. Create an ordered spoken-English curriculum that moves from foundational comfort to the learner's target situations. ${RIVA_DELIVERY_RULE} ${languageRules} Topic titles and descriptions must match the CEFR language rule (Hinglish/bilingual for A1–B2; English only for C1–C2 — no Hindi). Return only JSON.${contextBlock}`,
       },
       {
         role: "user",
@@ -120,6 +126,7 @@ export async function createLessonPlan(input: {
 }): Promise<LessonPlanResult> {
   const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {});
   const languageRules = formatLanguageRulesForPrompt(input.level);
+  const grammarRule = formatGrammarRuleForPrompt(input.level);
   const structurePrompt = getLessonPlanStructurePrompt(input.level);
   const mix = getLessonPlanQuestionMix(input.level);
   const noSar = mix.maxSar === 0;
@@ -168,7 +175,7 @@ export async function createLessonPlan(input: {
 
 ${RIVA_DELIVERY_RULE}
 ${languageRules}
-${RIVA_GRAMMAR_RULE}
+${grammarRule}
 
 ${structurePrompt}
 
@@ -258,7 +265,7 @@ Set wants_topic_change false for normal lesson answers, SAR repeats, open-ended 
 If they name a concrete replacement topic (e.g. restaurants, travel, interviews), set topic_clear true and put a short title in new_topic_title.
 If they only say something vague like "something else" / "kuch aur" / "change topic" without naming what, set topic_clear false and new_topic_title null.
 
-acknowledgment should be one short sentence acknowledging the switch matching the CEFR Hinglish mix (or empty if wants_topic_change is false). ${RIVA_DELIVERY_RULE} ${languageRules} Return only JSON.${contextBlock}`,
+acknowledgment should be one short sentence acknowledging the switch matching the CEFR language rule (English only for C1–C2; Hinglish for A1–B2; or empty if wants_topic_change is false). ${RIVA_DELIVERY_RULE} ${languageRules} Return only JSON.${contextBlock}`,
       },
       {
         role: "user",
@@ -273,7 +280,7 @@ Return JSON:
   "wants_topic_change": false,
   "new_topic_title": null,
   "topic_clear": false,
-  "acknowledgment": "optional short Hinglish ack"
+  "acknowledgment": "optional short ack matching CEFR language rule"
 }`,
       },
     ],
@@ -300,6 +307,9 @@ export async function deliverLessonTurn(input: {
     recentConversation: input.recentConversation,
   });
   const languageRules = formatLanguageRulesForPrompt(input.level);
+  const grammarRule = formatGrammarRuleForPrompt(input.level);
+  const delivererLanguage = getDelivererLanguageOverride(input.level);
+  const englishOnly = isEnglishOnlyLevel(input.level);
   const lessonPlanJson = formatLessonPlanForPrompt(input.lessonSteps);
   const currentStepJson = JSON.stringify(
     {
@@ -355,62 +365,62 @@ You receive a lesson plan as **grounding reference**, not a script. Each step's 
 
 ${RIVA_DELIVERY_RULE}
 ${languageRules}
-${RIVA_GRAMMAR_RULE}
+${grammarRule}
 
 ## Your job this turn
-- Produce one natural spoken reply for Riva to say aloud now — matching the CEFR Hinglish mix, except English phrases being taught.
+- Produce one natural spoken reply for Riva to say aloud now — ${englishOnly ? "in English only" : "matching the CEFR Hinglish mix, except English phrases being taught"}.
+- ${delivererLanguage}
 - When step reference content includes grammar notes, weave them into spoken_reply naturally — warm teacher tone, 1–2 grammar points max, spoken-friendly (not textbook).
 - Decide whether to advance to the next lesson step after this reply, or stay on the current step for another attempt.
-- **Questions live in the UI only.** For \`question\` steps, the app renders a QUESTION section from step metadata inside Riva's message bubble. Your \`spoken_reply\` must NEVER include the SAR target sentence or the open-ended question text on step_intro. On SAR retry (\`reteach_current_step\` true), give Hinglish feedback only — the app posts a fresh QUESTION section in a separate message.
+- **Questions live in the UI only.** For \`question\` steps, the app renders a QUESTION section from step metadata inside Riva's message bubble. Your \`spoken_reply\` must NEVER include the SAR target sentence or the open-ended question text on step_intro. On SAR retry (\`reteach_current_step\` true), give brief feedback only — the app posts a fresh QUESTION section in a separate message.
 
 ## Step types (from the plan)
-- **concept** — Teach situation/context in Hinglish only. When the plan's content includes grammar notes, explain WHY the English pattern works (tense, word order, polite forms, etc.) in warm spoken Hinglish — 1–2 points max. Do NOT include model English sentences or phrases the learner will repeat on a later SAR step — those live in the question step's UI card only. Spoken prose only — no questions. The app auto-advances after every concept intro — never ask the learner to say "ready", "continue", "ok", or "batana".
-- **practice** — Practice steps that duplicate the next SAR target may be auto-skipped by the app; otherwise deliver Hinglish-guided setup for what comes next; optionally reinforce one grammar point from the plan. Do NOT model English sentences that appear in a later SAR \`expectedAnswer\`. The app auto-advances after every practice intro — never ask the learner to say "ready", "continue", "ok", or "batana". No questions in spoken text.
-- **question / sar** — On step_intro, give brief Hinglish context only (no target sentence in spoken_reply). The app shows the SAR sentence in the QUESTION card immediately and speaks the English model sentence via TTS — do NOT ask the learner to say "ready" first or to repeat aloud before they see the card. On learner_response, give warm Hinglish feedback using SAR grading when provided. Set reteach_current_step true if score < 80; advance_step true when score ≥ 80. Do NOT restate the sentence on retry — the UI shows a new question card.
-- **question / open_ended** — On step_intro, **exactly one short Hinglish sentence** of generic context only (max ~15 words, e.g. "Deepesh, ab ek real scenario try karte hain."). NO scenario details from the step (no counter, officer, flight, etc.). NO questions. NO "imagine/socho/kaise/batao" phrasing. The QUESTION card shows \`questionPrompt\` or \`content\` separately — never paraphrase it. On learner_response, praise specifics, gently correct one issue in Hinglish, then decide advance vs reteach.
+- **concept** — Teach situation/context${englishOnly ? " in English" : " in Hinglish"}. When the plan's content includes grammar notes, explain WHY the English pattern works — 1–2 points max. Do NOT include model English sentences or phrases the learner will repeat on a later SAR step. Spoken prose only — no questions. The app auto-advances after every concept intro — never ask the learner to say "ready", "continue", "ok", or "batana".
+- **practice** — Practice steps that duplicate the next SAR target may be auto-skipped by the app; otherwise deliver guided setup for what comes next; optionally reinforce one grammar point from the plan. The app auto-advances after every practice intro. No questions in spoken text.
+- **question / sar** — On step_intro, give brief context only (no target sentence in spoken_reply). On learner_response, give warm feedback using SAR grading when provided. Set reteach_current_step true if score < 80; advance_step true when score ≥ 80. Do NOT restate the sentence on retry.
+- **question / open_ended** — On step_intro, **exactly one short sentence** of generic context only (max ~15 words${englishOnly ? ', e.g. "Let\\'s try a real scenario."' : ', e.g. "Deepesh, ab ek real scenario try karte hain."'}). NO scenario details from the step. NO questions. The QUESTION card shows \`questionPrompt\` or \`content\` separately — never paraphrase it. On learner_response, praise specifics, gently correct one issue, then decide advance vs reteach.
 
-**Open-ended step_intro examples (spoken_reply only — the QUESTION card shows \`questionPrompt\` / \`content\` separately):**
-- BAD: "Deepesh, ab check-in counter ka ek real-life scenario try karte hain. Imagine karo tum counter par khade ho, toh wahan officer se kaise baat shuru karoge aur apni flight ki details kaise doge?"
-- BAD: "Deepesh, ab ek real-life situation try karte hain. Socho tum airport par kisi fellow traveler se mil rahe ho — tum apna introduction kaise doge? Mic on karke batao."
-- BAD: "Ab apne words mein bataiye."
+**Open-ended step_intro examples (spoken_reply only):**
+${
+  englishOnly
+    ? `- BAD: any Hindi/Hinglish, or copying the QUESTION card prompt
+- GOOD: "Let's try a real scenario."
+- GOOD: "Alright — your turn to speak."`
+    : `- BAD: "Deepesh, ab check-in counter ka ek real-life scenario try karte hain..."
 - GOOD: "Deepesh, ab ek real scenario try karte hain."
-- GOOD: "Chaliye ab real life mein try karte hain."
-- NEVER copy or paraphrase the open-ended \`questionPrompt\` or \`content\` into spoken_reply. NEVER add answer CTAs like "bataiye", "jawab do", or "mic dabao" — the QUESTION card handles that.
+- GOOD: "Chaliye ab real life mein try karte hain."`
+}
+- NEVER copy or paraphrase the open-ended \`questionPrompt\` or \`content\` into spoken_reply.
 
-**SAR step_intro examples (spoken_reply only — QUESTION card shows label + English sentence):**
-- BAD: "Ye sentence repeat kijiye: Good morning, here is my passport."
-- BAD: "Good morning, here is my passport."
-- GOOD: "Chalo airport check-in par ek useful phrase practice karte hain."
-- **recap** — Summarize what was practiced in Hinglish. Teaching prose only — no questions. For step_intro on recap, set advance_step true. The app auto-completes the topic after recap.
+**SAR step_intro examples (if SAR exists at this level):**
+- BAD: reading the target sentence aloud on step_intro
+- GOOD: ${englishOnly ? '"Let\\'s practice a useful phrase."' : '"Chalo airport check-in par ek useful phrase practice karte hain."'}
+- **recap** — Summarize what was practiced${englishOnly ? " in English" : " in Hinglish"}. Teaching prose only — no questions. For step_intro on recap, set advance_step true.
 
 ## Spoken delivery rules
-Every \`spoken_reply\` is Hinglish teaching prose only (except English phrases being taught on SAR retry feedback). Match the instruction to the current step type and turn kind:
+${delivererLanguage}
 
 | Step type | Spoken intro behavior |
 |-----------|----------------------|
-| \`concept\` | Hinglish teaching + brief grammar why (if in plan) — NO ready/continue/batana CTA; set advance_step true |
-| \`practice\` | Hinglish teaching + optional grammar reminder — NO ready/continue/batana CTA; set advance_step true |
-| \`question\` + \`sar\` step_intro | Brief Hinglish setup only — NO repeat/say-ready CTA; advance_step false; the QUESTION card is the action |
-| \`question\` + \`sar\` learner_response | Hinglish feedback only; if reteaching, e.g. "Phir se ek baar repeat karein." — no sentence restatement |
-| \`question\` + \`open_ended\` step_intro | **One short sentence only** — generic setup, NO scenario/question overlap with card; advance_step false |
-| \`question\` + \`open_ended\` learner_response | Hinglish feedback; if reteaching, invite them to try again without repeating the full question |
-| \`recap\` | Warm Hinglish wrap-up only — no next-step prompt; advance_step true |
+| \`concept\` | Teaching + brief grammar why (if in plan) — NO ready/continue CTA; set advance_step true |
+| \`practice\` | Teaching + optional grammar reminder — NO ready/continue CTA; set advance_step true |
+| \`question\` + \`sar\` step_intro | Brief setup only — advance_step false |
+| \`question\` + \`sar\` learner_response | Feedback only; if reteaching, invite another try — no sentence restatement |
+| \`question\` + \`open_ended\` step_intro | **One short sentence only** — generic setup; advance_step false |
+| \`question\` + \`open_ended\` learner_response | Feedback; if reteaching, invite another try without repeating the full question |
+| \`recap\` | Warm wrap-up only — advance_step true |
 
 Rules:
-- **NEVER** ask the learner to say "ready", "continue", "ok", "batana", "boliye jab taiyaar ho", or similar advance phrases on any step.
+- **NEVER** ask the learner to say "ready", "continue", "ok", "batana", or similar advance phrases on any step.
 - Never embed SAR sentences or open-ended questions in spoken_reply — those appear in the QUESTION UI section only.
-- concept/practice/recap: Hinglish teaching prose only, no questions, no English model sentences that duplicate a later SAR target.
-- On concept/practice intros, explain grammar naturally when the plan includes it — e.g. "English mein pehle subject, phir verb aata hai" — keep it short and spoken.
-- English model sentences belong only in SAR step \`content\` / \`expectedAnswer\` (shown in the QUESTION card), not in concept/practice spoken_reply.
-- On \`step_intro\` for question steps — do NOT delay the QUESTION card with a "ready" or "repeat" CTA; setup ends naturally.
-- The app chains concept → practice intros automatically until a question or recap — no mic input needed between teaching steps.
-- On \`learner_response\` turns — Hinglish feedback only; if staying on step, a brief retry cue is enough (SAR retry card is posted by the app).
+- On \`step_intro\` for question steps — do NOT delay the QUESTION card with a "ready" or "repeat" CTA.
+- The app chains concept → practice intros automatically until a question or recap.
 
 ## Adaptation rules
-- Match CEFR level vocabulary, sentence length, and the CEFR Hinglish mix rule above.
-- If the learner is struggling, simplify, rephrase, and encourage using more Hindi scaffolding.
-- If they are doing well, add slight challenge or richer phrasing (more English OK at higher CEFR).
-- Never read step content verbatim unless it is already perfect natural speech — prefer fresh, conversational delivery matching the CEFR mix.
+- Match CEFR level vocabulary, sentence length, and the CEFR language rule above.
+- ${englishOnly ? "If the learner is struggling, simplify in English — never switch to Hindi/Hinglish." : "If the learner is struggling, simplify, rephrase, and encourage using more Hindi scaffolding."}
+- If they are doing well, add slight challenge or richer phrasing.
+- Never read step content verbatim unless it is already perfect natural speech — prefer fresh, conversational delivery matching the CEFR language rule.
 - Do not mention JSON, lesson plans, scores as numbers to the learner, or app mechanics.
 
 Return only JSON.${contextBlock}`,
@@ -447,12 +457,13 @@ Return JSON:
 }
 
 Guidance:
-- concept/practice/recap step_intro: Hinglish teaching (weave in grammar from step content when present), advance_step true, NO ready/continue/batana CTA — the app chains automatically.
-- step_intro on question (SAR/open_ended): advance_step false; QUESTION card metadata is attached by the app — spoken_reply is **one short Hinglish sentence max** for open_ended. The step's \`questionPrompt\` / \`content\` is UI-only for the QUESTION card — do NOT read, quote, or paraphrase it in spoken_reply.
+- concept/practice/recap step_intro: teaching prose matching CEFR language rule, advance_step true, NO ready/continue CTA — the app chains automatically.
+- step_intro on question (SAR/open_ended): advance_step false; spoken_reply is **one short sentence max** for open_ended${englishOnly ? " in English only" : ""}. Do NOT read, quote, or paraphrase \`questionPrompt\` / \`content\`.
 - step_intro on recap: advance_step true.
 - learner_response on concept/practice: should not occur — the app auto-advances; if it does, brief acknowledgment then advance_step true.
-- learner_response on SAR: use grading to choose advance vs reteach (threshold 80%); feedback only — never restate the target sentence; the app posts a fresh QUESTION card on retry.
-- learner_response on open_ended: feedback plus advance unless reteach is warranted.`,
+- learner_response on SAR: use grading to choose advance vs reteach (threshold 80%); feedback only — never restate the target sentence.
+- learner_response on open_ended: feedback plus advance unless reteach is warranted.
+${englishOnly ? "- Reminder: spoken_reply must contain zero Hindi/Hinglish." : ""}`,
       },
     ],
     lessonDeliverySchema,

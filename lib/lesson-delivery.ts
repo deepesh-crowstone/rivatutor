@@ -1,3 +1,9 @@
+import {
+  fallbackGenericAdvance,
+  fallbackOpenEndedAdvance,
+  fallbackSarPassFeedback,
+  fallbackSarRetryFeedback,
+} from "@/lib/cefr-copy";
 import type {
   LessonDeliveryResult,
   LessonPlanStepReference,
@@ -581,6 +587,7 @@ export function buildFallbackLessonDelivery(input: {
   turnKind: LessonTurnKind;
   nextStep?: Pick<LessonPlanStepReference, "type"> | null;
   sarGrading?: SarGradingContext;
+  level?: string | null;
 }): LessonDeliveryResult {
   if (input.turnKind === "step_intro") {
     const spokenReply =
@@ -598,8 +605,16 @@ export function buildFallbackLessonDelivery(input: {
   if (input.step.type === "question" && input.step.questionType === "sar" && input.sarGrading) {
     const passed = isSarPassingScore(input.sarGrading.score);
     const feedback = passed
-      ? `Bahut badhiya! Bilkul sahi bola. ${input.sarGrading.correctCount} mein se ${input.sarGrading.expectedCount} words match hue.`
-      : `Achha try tha. ${input.sarGrading.correctCount} mein se ${input.sarGrading.expectedCount} words match hue. Phir se ek baar repeat karein.`;
+      ? fallbackSarPassFeedback(
+          input.sarGrading.correctCount,
+          input.sarGrading.expectedCount,
+          input.level,
+        )
+      : fallbackSarRetryFeedback(
+          input.sarGrading.correctCount,
+          input.sarGrading.expectedCount,
+          input.level,
+        );
     return {
       spoken_reply: feedback,
       advance_step: passed,
@@ -609,14 +624,14 @@ export function buildFallbackLessonDelivery(input: {
 
   if (input.step.type === "question") {
     return {
-      spoken_reply: "Achha jawab! Chaliye aage badhte hain.",
+      spoken_reply: fallbackOpenEndedAdvance(input.level),
       advance_step: true,
       reteach_current_step: false,
     };
   }
 
   return {
-    spoken_reply: "Bahut badhiya! Chaliye aage badhte hain.",
+    spoken_reply: fallbackGenericAdvance(input.level),
     advance_step: true,
     reteach_current_step: false,
   };

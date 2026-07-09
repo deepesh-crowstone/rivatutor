@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AppState, ChatMessageDto, LessonStepDto, QuestionCardMetadata } from "@/lib/domain";
 import { CEFR_LEVELS } from "@/lib/domain";
-import { topicSuggestionsUiLabel } from "@/lib/cefr-copy";
+import { loadingLabel, topicSuggestionsUiLabel } from "@/lib/cefr-copy";
 import { SAR_QUESTION_PROMPT, stripUiInstructions } from "@/lib/content";
 import { buildAssistantSpeechSegments } from "@/lib/assistant-speech";
 import { sanitizeQuestionStepIntroReply } from "@/lib/lesson-delivery";
@@ -33,7 +33,7 @@ function isSarLessonStep(step: LessonStepDto | null | undefined): boolean {
 
 export function RivaApp() {
   const [state, setState] = useState<AppState | null>(null);
-  const [loading, setLoading] = useState("Riva load ho rahi hai...");
+  const [loading, setLoading] = useState(loadingLabel("session"));
   const [error, setError] = useState("");
   const [composerPhase, setComposerPhase] = useState<ComposerPhase>("idle");
   const [pendingUserMessage, setPendingUserMessage] = useState<ChatMessageDto | null>(null);
@@ -57,9 +57,10 @@ export function RivaApp() {
   const { needsUsername, needsName, needsLevel, hasCurriculum, hasActiveTopic, composerMode, micDisabled } =
     deriveComposerState(state);
   const composerBusy = composerPhase !== "idle";
+  const learnerLevel = state?.profile.selfDeclaredLevel;
 
   async function refreshState() {
-    await run("Riva load ho rahi hai...", async () => {
+    await run(loadingLabel("session", learnerLevel), async () => {
       setState(await api<AppState>("/api/session"));
     });
   }
@@ -83,7 +84,7 @@ export function RivaApp() {
 
   async function selectLevel(level: string) {
     abortTtsPlayback();
-    await run("Aapka level save ho raha hai...", async () => {
+    await run(loadingLabel("level", level), async () => {
       setState(await api("/api/onboarding", { method: "POST", body: { answer: level } }));
     });
   }
@@ -100,7 +101,7 @@ export function RivaApp() {
 
   async function selectTopic(topicId: string) {
     abortTtsPlayback();
-    await run("Lesson plan ban raha hai...", async () => {
+    await run(loadingLabel("lessonPlan", learnerLevel), async () => {
       setState(await api("/api/topics/select", { method: "POST", body: { topicId } }));
     });
   }
@@ -149,7 +150,7 @@ export function RivaApp() {
 
   async function reset() {
     abortTtsPlayback();
-    await run("Sign out ho rahe hain...", async () => {
+    await run(loadingLabel("session", learnerLevel), async () => {
       const nextState = await api<AppState>("/api/session", { method: "DELETE" });
       setState(nextState);
       lastSpokenIdRef.current = null;
@@ -629,8 +630,8 @@ export function RivaApp() {
               label={
                 loading ||
                 (composerPhase === "transcribing"
-                  ? "Transcribe ho raha hai..."
-                  : "Riva soch rahi hai...")
+                  ? loadingLabel("transcribing", learnerLevel)
+                  : loadingLabel("thinking", learnerLevel))
               }
             />
           ) : null}
@@ -642,7 +643,7 @@ export function RivaApp() {
             disabled={Boolean(loading)}
             serverError={error}
             onSubmit={async (username) => {
-              await run("Sign in ho rahe hain...", async () => {
+              await run(loadingLabel("signIn"), async () => {
                 await submitUsernameAnswer(username);
               });
             }}
@@ -650,6 +651,7 @@ export function RivaApp() {
         ) : (
           <Composer
             mode={composerMode}
+            level={learnerLevel}
             disabled={Boolean(loading) || composerMode === "blocked" || composerBusy}
             micDisabled={micDisabled}
             phase={composerPhase}
@@ -979,6 +981,7 @@ function TranscribingIcon() {
 
 function Composer(props: {
   mode: ComposerMode;
+  level?: string | null;
   disabled: boolean;
   micDisabled: boolean;
   phase: ComposerPhase;
@@ -991,15 +994,24 @@ function Composer(props: {
   }
 
   const micButtonDisabled = props.disabled || props.micDisabled;
+  const englishOnly = (props.level ?? "").toUpperCase() === "C1" || (props.level ?? "").toUpperCase() === "C2";
 
   const micLabel =
     props.phase === "transcribing"
-      ? "Speech transcribe ho rahi hai"
+      ? englishOnly
+        ? "Transcribing speech"
+        : "Speech transcribe ho rahi hai"
       : props.phase === "waitingForRiva"
-        ? "Riva ka jawab aa raha hai"
+        ? englishOnly
+          ? "Waiting for Riva"
+          : "Riva ka jawab aa raha hai"
         : props.recording
-          ? "Recording band karein"
-          : "Boliye";
+          ? englishOnly
+            ? "Stop recording"
+            : "Recording band karein"
+          : englishOnly
+            ? "Speak"
+            : "Boliye";
 
   return (
     <div className={`composer ${props.phase !== "idle" ? "composer-busy" : ""}`}>
@@ -1034,7 +1046,7 @@ function Composer(props: {
       </div>
       {props.phase === "transcribing" ? (
         <span className="composer-status" aria-live="polite">
-          Transcribe ho raha hai...
+          {loadingLabel("transcribing", props.level)}
         </span>
       ) : null}
     </div>
