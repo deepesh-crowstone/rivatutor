@@ -3,6 +3,7 @@ import {
   intentClaritySchema,
   lessonDeliverySchema,
   lessonPlanSchema,
+  topicChangeIntentSchema,
   type CurriculumResult,
   type IntentClarityResult,
   type LessonDeliveryResult,
@@ -11,6 +12,7 @@ import {
   type LessonTurnKind,
   type LearnerContextInput,
   type SarGradingContext,
+  type TopicChangeIntentResult,
 } from "@/lib/domain";
 import { RIVA_DELIVERY_RULE, RIVA_GRAMMAR_RULE, RIVA_LANGUAGE_RULE } from "@/lib/content";
 import { formatLessonPlanForPrompt } from "@/lib/lesson-delivery";
@@ -219,6 +221,50 @@ Return JSON:
       },
     ],
     lessonPlanSchema,
+  );
+}
+
+export async function classifyTopicChangeIntent(input: {
+  learnerUtterance: string;
+  currentTopicTitle: string;
+  currentStepSummary: string;
+  learnerContext?: LearnerContextInput;
+}): Promise<TopicChangeIntentResult> {
+  const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {});
+  return callOpenRouterJson(
+    [
+      {
+        role: "system",
+        content:
+          `You are Riva's Topic-Change Intent Classifier. Decide if the learner wants to abandon the current mid-lesson topic and switch to a different practice topic.
+
+Set wants_topic_change true ONLY when they clearly ask to change/switch/leave the current topic, demand a new topic, or name a different subject to practice instead.
+
+Set wants_topic_change false for normal lesson answers, SAR repeats, open-ended practice replies, clarifications about the current topic, or continue/ready phrases.
+
+If they name a concrete replacement topic (e.g. restaurants, travel, interviews), set topic_clear true and put a short title in new_topic_title.
+If they only say something vague like "something else" / "kuch aur" / "change topic" without naming what, set topic_clear false and new_topic_title null.
+
+acknowledgment should be one short Hinglish sentence acknowledging the switch (or empty if wants_topic_change is false). ${RIVA_DELIVERY_RULE} ${RIVA_LANGUAGE_RULE} Return only JSON.${contextBlock}`,
+      },
+      {
+        role: "user",
+        content: `Current topic: ${input.currentTopicTitle}
+Current step: ${input.currentStepSummary}
+
+Latest learner utterance:
+${input.learnerUtterance}
+
+Return JSON:
+{
+  "wants_topic_change": false,
+  "new_topic_title": null,
+  "topic_clear": false,
+  "acknowledgment": "optional short Hinglish ack"
+}`,
+      },
+    ],
+    topicChangeIntentSchema,
   );
 }
 

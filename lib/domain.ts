@@ -111,6 +111,15 @@ export const lessonDeliverySchema = z.object({
 
 export type LessonDeliveryResult = z.infer<typeof lessonDeliverySchema>;
 
+export const topicChangeIntentSchema = z.object({
+  wants_topic_change: z.boolean(),
+  new_topic_title: z.string().nullable().optional(),
+  topic_clear: z.boolean().default(false),
+  acknowledgment: z.string().optional(),
+});
+
+export type TopicChangeIntentResult = z.infer<typeof topicChangeIntentSchema>;
+
 export type LessonPlanStepReference = {
   order: number;
   type: LessonStepType | string;

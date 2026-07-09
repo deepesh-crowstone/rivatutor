@@ -13,6 +13,7 @@ Complete inventory of LLM prompts, shared delivery rules, fallback delivery copy
 | 2   | `planCurriculum`                         | `lib/ai.ts`               | LLM (system + user)     | **Active** — first curriculum generation after intent is clear  |
 | 3   | `createLessonPlan`                       | `lib/ai.ts`               | LLM (system + user)     | **Active** — reference plan on topic lock (not verbatim script) |
 | 4   | `deliverLessonTurn`                      | `lib/ai.ts`               | LLM (system + user)     | **Active** — adaptive spoken delivery each lesson turn          |
+| 4b  | `classifyTopicChangeIntent`              | `lib/ai.ts`               | LLM (system + user)     | **Active** — soft mid-lesson topic-change confirmation          |
 | 5   | `extractUserInfo` (system)               | `lib/user-extraction.ts`  | LLM system prompt       | **Active** — goals `name`, `level`, `intent` only               |
 | 6   | `extractUserInfo` goal: `name`           | `lib/user-extraction.ts`  | LLM user instructions   | **Active** — onboarding name capture                            |
 | 7   | `extractUserInfo` goal: `level`          | `lib/user-extraction.ts`  | LLM user instructions   | **Active** — onboarding level capture                           |
@@ -33,7 +34,7 @@ Complete inventory of LLM prompts, shared delivery rules, fallback delivery copy
 | 22  | UI choice labels                         | `components/RivaApp.tsx`  | Hardcoded UI copy       | **Active** — Hinglish-first; rendered as Riva messages in UI        |
 
 
-**Counts:** 4 LLM functions in `lib/ai.ts` · 2 additional LLM extractors (`extractUserInfo`, private `extractProfileUpdate`) · 1 conversation formatter export · 2 shared injection helpers · 3 shared rule constants · 1 fallback delivery helper · 5 hardcoded copy sources.
+**Counts:** 5 LLM functions in `lib/ai.ts` · 2 additional LLM extractors (`extractUserInfo`, private `extractProfileUpdate`) · 1 conversation formatter export · 2 shared injection helpers · 3 shared rule constants · 1 fallback delivery helper · 5 hardcoded copy sources.
 
 **Removed (no longer in codebase):** `giveOpenEndedFeedback`, `openEndedFeedbackSchema`, `extractUserInfo` goals `profile_update` and `general`, `resolveLearnerName`, `parseLearnerName`, duplicate onboarding/profile LLM fallbacks. Open-ended question feedback is handled by `deliverLessonTurn` on `learner_response` turns.
 
@@ -68,6 +69,7 @@ deliverLessonTurn  ──►  spoken_reply stored as assistant chat message
   - **`learner_response`** — learner answered a step (`submitLessonAnswer`); includes SAR grading and open-ended feedback (no separate feedback LLM)
 - The deliverer receives the full plan JSON, current step definition, recent conversation (last 16 topic messages), learner profile context, and optional SAR grading. It returns `spoken_reply` plus `advance_step` / `reteach_current_step`.
 - **`lib/teacher.ts`** marks a step completed and calls `advanceLesson()` only when `shouldAdvanceAfterDelivery()` is true (`advance_step && !reteach_current_step`).
+- **Mid-lesson topic change:** before normal delivery, `submitLessonAnswer` runs `detectTopicChangeIntent` (and optionally `classifyTopicChangeIntent`). On a confirmed change it abandons the current lesson and either locks a new topic or re-enters topic selection — it does not continue old lesson steps.
 
 ### SAR grading
 
@@ -94,7 +96,7 @@ deliverLessonTurn  ──►  spoken_reply stored as assistant chat message
 
 **File:** `lib/content.ts`
 
-**Used by:** All LLM functions in `lib/ai.ts` (`judgeIntentClarity`, `planCurriculum`, `createLessonPlan`, `deliverLessonTurn`).
+**Used by:** All LLM functions in `lib/ai.ts` (`judgeIntentClarity`, `planCurriculum`, `createLessonPlan`, `deliverLessonTurn`, `classifyTopicChangeIntent`).
 
 **Verbatim text:**
 
@@ -112,7 +114,7 @@ Never reference UI controls, buttons, taps, clicks, or app mechanics. Speak as a
 
 **File:** `lib/content.ts`
 
-**Used by:** All LLM functions in `lib/ai.ts` (`judgeIntentClarity`, `planCurriculum`, `createLessonPlan`, `deliverLessonTurn`).
+**Used by:** All LLM functions in `lib/ai.ts` (`judgeIntentClarity`, `planCurriculum`, `createLessonPlan`, `deliverLessonTurn`, `classifyTopicChangeIntent`).
 
 **Verbatim text:**
 
@@ -556,6 +558,68 @@ Guidance:
 
 ---
 
+### 4b. `classifyTopicChangeIntent`
+
+**Status:** Active  
+**Called from:** `lib/teacher.ts` → `resolveTopicChangeIntent()` (only for soft heuristic matches during `submitLessonAnswer`)
+
+**Related (non-LLM):** `detectTopicChangeIntent()` in `lib/topic-change.ts` handles strong phrases (`change topic`, `new topic: …`, `kuch aur`, etc.) without calling the model.
+
+#### System prompt
+
+```
+You are Riva's Topic-Change Intent Classifier. Decide if the learner wants to abandon the current mid-lesson topic and switch to a different practice topic.
+
+Set wants_topic_change true ONLY when they clearly ask to change/switch/leave the current topic, demand a new topic, or name a different subject to practice instead.
+
+Set wants_topic_change false for normal lesson answers, SAR repeats, open-ended practice replies, clarifications about the current topic, or continue/ready phrases.
+
+If they name a concrete replacement topic (e.g. restaurants, travel, interviews), set topic_clear true and put a short title in new_topic_title.
+If they only say something vague like "something else" / "kuch aur" / "change topic" without naming what, set topic_clear false and new_topic_title null.
+
+acknowledgment should be one short Hinglish sentence acknowledging the switch (or empty if wants_topic_change is false). {RIVA_DELIVERY_RULE} {RIVA_LANGUAGE_RULE} Return only JSON.{contextBlock}
+```
+
+#### User prompt
+
+```
+Current topic: {currentTopicTitle}
+Current step: {currentStepSummary}
+
+Latest learner utterance:
+{learnerUtterance}
+
+Return JSON:
+{
+  "wants_topic_change": false,
+  "new_topic_title": null,
+  "topic_clear": false,
+  "acknowledgment": "optional short Hinglish ack"
+}
+```
+
+#### Response schema (`topicChangeIntentSchema`)
+
+```json
+{
+  "wants_topic_change": "boolean",
+  "new_topic_title": "string | null (optional)",
+  "topic_clear": "boolean",
+  "acknowledgment": "string (optional)"
+}
+```
+
+**Application behavior after a confirmed change:**
+
+1. Persist user message as `topic_change`
+2. `abandonActiveLesson` — set active topic to `pending`, clear `activeTopicId` / `currentStepOrder`, reset step `completed` flags
+3. If title clear → `topic_change_ack` + `lockTopic({ freeformTitle })` (new lesson plan + delivery)
+4. If vague → `topic_suggestion` clarify message and return to topic selection (composer mode `topic`)
+
+Learner profile (name, level, intent) is preserved.
+
+---
+
 ## LLM Prompts — `lib/user-extraction.ts`
 
 ### `extractUserInfo`
@@ -811,6 +875,9 @@ These strings are stored or displayed as Riva assistant messages without an LLM 
 | Intent unclear, no LLM follow-up | `Ek real situation batayein jahan aap English better bolna chahte hain.` | `intent_question` |
 | Intent clear, curriculum ready   | `Bahut badhiya! Maine aapke liye personalized topic sequence banayi hai. Neeche se topic chuno ya bolo kya practice karna hai.` | `topic_suggestion` |
 | Topic locked (user message)      | `Let's practice {topic.title}.`                                                                                                            | `topic_choice` (stored as user role)    |
+| Mid-lesson topic change (user)   | Learner utterance (e.g. "change topic", "new topic: travel")                                                                               | `topic_change` (stored as user role)    |
+| Mid-lesson topic change (clear)  | `Theek hai, ab hum "{title}" practice karenge.`                                                                                            | `topic_change_ack`                      |
+| Mid-lesson topic change (vague)  | `Theek hai, topic change karte hain. Aap kya practice karna chahte ho? Neeche se topic chuno ya bolo kya seekhna hai.`                     | `topic_suggestion`                      |
 | Topic locked / next step         | `{deliverLessonTurn.spoken_reply}` or fallback                                                                                             | step type (`concept`, `question`, etc.) |
 | SAR question response            | `{deliverLessonTurn.spoken_reply}` or fallback                                                                                             | `sar_feedback`                          |
 | Open-ended response              | `{deliverLessonTurn.spoken_reply}` or fallback                                                                                             | `feedback`                              |
@@ -918,6 +985,9 @@ lockTopic
   └─ deliverStepTurn(step_intro) → deliverLessonTurn | buildFallbackLessonDelivery
 
 submitLessonAnswer
+  ├─ detectTopicChangeIntent (+ classifyTopicChangeIntent for soft matches)
+  │    ├─ clear title → abandonActiveLesson → topic_change_ack → lockTopic(freeformTitle)
+  │    └─ vague → abandonActiveLesson → topic_suggestion clarify (re-enter topic selection)
   ├─ diffTranscript (SAR steps only)
   └─ deliverStepTurn(learner_response) → deliverLessonTurn | buildFallbackLessonDelivery
        └─ shouldAdvanceAfterDelivery → advanceLesson → deliverStepTurn(step_intro) | completeTopic
@@ -934,6 +1004,7 @@ submitLessonAnswer
 | `planCurriculum`                     | Active | Runs once when topic list is empty                         |
 | `createLessonPlan`                   | Active | Lazy-created per topic; plan content = deliverer reference |
 | `deliverLessonTurn`                  | Active | Every lesson spoken turn (intro, SAR feedback, open-ended feedback) |
+| `classifyTopicChangeIntent`          | Active | Soft mid-lesson topic-change confirmation (after heuristic)        |
 | `extractUserInfo` → `name`           | Active | Onboarding via `extractNameFromAnswer` + regex fallback    |
 | `extractUserInfo` → `level`          | Active | `resolveLearnerLevel` fallback when `parseCefrLevel` fails |
 | `extractUserInfo` → `intent`         | Active | Intent answer enrichment before clarity judge              |

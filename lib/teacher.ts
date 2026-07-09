@@ -1,4 +1,4 @@
-import { deliverLessonTurn, createLessonPlan, judgeIntentClarity, planCurriculum } from "@/lib/ai";
+import { deliverLessonTurn, createLessonPlan, classifyTopicChangeIntent, judgeIntentClarity, planCurriculum } from "@/lib/ai";
 import { SAR_QUESTION_PROMPT, stripUiInstructions } from "@/lib/content";
 import { stripReadyBoliyeFromSpeech } from "@/lib/assistant-speech";
 import {
@@ -19,6 +19,12 @@ import { parseJsonArray, parseMetadata, stringifyJson } from "@/lib/json";
 import { updateProfileFromConversation } from "@/lib/profile-pipeline";
 import { getAppState, requireActiveLearner, toLearnerContext } from "@/lib/state";
 import type { LessonDeliveryResult, LessonPlanStepReference, LessonTurnKind } from "@/lib/domain";
+import {
+  detectTopicChangeIntent,
+  TOPIC_CHANGE_ACK_WITH_TITLE,
+  TOPIC_CHANGE_CLARIFY_MESSAGE,
+  type TopicChangeDetection,
+} from "@/lib/topic-change";
 import { alignExpectedWords, diffTranscript } from "@/lib/word-diff";
 import { extractUserInfo, mergeExtractedArrays } from "@/lib/user-extraction";
 
@@ -243,6 +249,22 @@ export async function submitLessonAnswer(answer: string) {
   }
 
   const trimmed = answer.trim();
+  const topicChange = await resolveTopicChangeIntent({
+    utterance: trimmed,
+    currentTopicTitle: topic.title,
+    currentStep,
+    learnerContext: toLearnerContext(topic.learner),
+  });
+
+  if (topicChange.wantsChange) {
+    return handleMidLessonTopicChange({
+      learnerId: learner.id,
+      activeTopicId: topic.id,
+      utterance: trimmed,
+      detection: topicChange,
+    });
+  }
+
   const isPassiveStep = currentStep.type === "concept" || currentStep.type === "practice";
   const storedAnswer = trimmed || (isPassiveStep ? "" : "Continue");
   const displayAnswer = storedAnswer || "…";
@@ -331,6 +353,114 @@ export async function submitLessonAnswer(answer: string) {
   });
 
   return advanceLesson(learner.id, topic.id, currentStep.order);
+}
+
+async function resolveTopicChangeIntent(input: {
+  utterance: string;
+  currentTopicTitle: string;
+  currentStep: DbLessonStep;
+  learnerContext: ReturnType<typeof toLearnerContext>;
+}): Promise<TopicChangeDetection> {
+  const heuristic = detectTopicChangeIntent(input.utterance, input.currentTopicTitle);
+  if (heuristic.confidence === "strong" || heuristic.confidence === "none") {
+    return heuristic;
+  }
+
+  try {
+    const classified = await classifyTopicChangeIntent({
+      learnerUtterance: input.utterance,
+      currentTopicTitle: input.currentTopicTitle,
+      currentStepSummary: `${input.currentStep.type}${
+        input.currentStep.questionType ? `/${input.currentStep.questionType}` : ""
+      }: ${input.currentStep.content.slice(0, 160)}`,
+      learnerContext: input.learnerContext,
+    });
+
+    if (!classified.wants_topic_change) {
+      return { wantsChange: false, topicClear: false, newTopicTitle: null, confidence: "none" };
+    }
+
+    const title = classified.topic_clear
+      ? classified.new_topic_title?.trim() || heuristic.newTopicTitle
+      : null;
+
+    return {
+      wantsChange: true,
+      topicClear: Boolean(title),
+      newTopicTitle: title,
+      confidence: "soft",
+    };
+  } catch {
+    // Soft heuristic alone is enough to proceed when the LLM classifier fails.
+    return heuristic;
+  }
+}
+
+async function handleMidLessonTopicChange(input: {
+  learnerId: string;
+  activeTopicId: string;
+  utterance: string;
+  detection: TopicChangeDetection;
+}) {
+  await prisma.chatMessage.create({
+    data: {
+      learnerId: input.learnerId,
+      topicId: input.activeTopicId,
+      role: "user",
+      kind: "topic_change",
+      content: input.utterance.trim() || "Change topic",
+    },
+  });
+
+  await abandonActiveLesson(input.learnerId, input.activeTopicId);
+
+  const newTitle = input.detection.topicClear ? input.detection.newTopicTitle?.trim() : null;
+  if (newTitle) {
+    await prisma.chatMessage.create({
+      data: {
+        learnerId: input.learnerId,
+        role: "assistant",
+        kind: "topic_change_ack",
+        content: TOPIC_CHANGE_ACK_WITH_TITLE(newTitle),
+      },
+    });
+    return lockTopic({ freeformTitle: newTitle });
+  }
+
+  await prisma.chatMessage.create({
+    data: {
+      learnerId: input.learnerId,
+      role: "assistant",
+      kind: "topic_suggestion",
+      content: TOPIC_CHANGE_CLARIFY_MESSAGE,
+    },
+  });
+
+  return getAppState();
+}
+
+/** Clear active lesson progress so the old plan is no longer delivered. */
+async function abandonActiveLesson(learnerId: string, topicId: string) {
+  const lessonPlan = await prisma.lessonPlan.findUnique({ where: { topicId } });
+  if (lessonPlan) {
+    await prisma.lessonStep.updateMany({
+      where: { lessonPlanId: lessonPlan.id },
+      data: { completed: false },
+    });
+  }
+
+  await prisma.topic.update({
+    where: { id: topicId },
+    data: { status: "pending" },
+  });
+
+  await prisma.learnerProgress.update({
+    where: { learnerId },
+    data: {
+      activeTopicId: null,
+      currentStepOrder: 0,
+    },
+  });
 }
 
 async function advanceLesson(learnerId: string, topicId: string, currentOrder: number) {
