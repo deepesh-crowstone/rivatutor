@@ -30,21 +30,31 @@ describe("parseUsernameInput", () => {
 });
 
 describe("buildWelcomeBackMessage", () => {
-  it("summarizes stored profile context", () => {
-    const message = buildWelcomeBackMessage({
+  it("summarizes stored profile context with CEFR-banded copy", () => {
+    const a2 = buildWelcomeBackMessage({
       name: "Deepesh",
       username: "dipesh",
-      selfDeclaredLevel: "B1",
+      selfDeclaredLevel: "A2",
       intentSummary: "Speak confidently at work",
       userInterests: '["travel","movies"]',
       extractedKeyFacts: '["Works in tech"]',
     });
+    expect(a2).toContain("Wapas aaye aap, Deepesh!");
+    expect(a2).toContain("level A2");
+    expect(a2).toContain("Speak confidently at work");
 
-    expect(message).toContain("Wapas aaye aap, Deepesh!");
-    expect(message).toContain("level B1");
-    expect(message).toContain("Speak confidently at work");
-    expect(message).toContain("travel");
-    expect(message).toContain("Works in tech");
+    const c1 = buildWelcomeBackMessage({
+      name: "Deepesh",
+      username: "dipesh",
+      selfDeclaredLevel: "C1",
+      intentSummary: "Speak confidently at work",
+      userInterests: '["travel","movies"]',
+      extractedKeyFacts: '["Works in tech"]',
+    });
+    expect(c1).toContain("Welcome back, Deepesh!");
+    expect(c1).toContain("You're at C1");
+    expect(c1).toContain("travel");
+    expect(c1).toContain("Works in tech");
   });
 
   it("falls back to username when name is missing", () => {

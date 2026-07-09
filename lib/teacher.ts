@@ -20,11 +20,13 @@ import { updateProfileFromConversation } from "@/lib/profile-pipeline";
 import { getAppState, requireActiveLearner, toLearnerContext } from "@/lib/state";
 import type { LessonDeliveryResult, LessonPlanStepReference, LessonTurnKind } from "@/lib/domain";
 import {
-  detectTopicChangeIntent,
-  TOPIC_CHANGE_ACK_WITH_TITLE,
-  TOPIC_CHANGE_CLARIFY_MESSAGE,
-  type TopicChangeDetection,
-} from "@/lib/topic-change";
+  intentFollowUpFallback,
+  topicChangeAckWithTitle,
+  topicChangeClarifyMessage,
+  topicCompleteMessage,
+  topicSuggestionMessage,
+} from "@/lib/cefr-copy";
+import { detectTopicChangeIntent, type TopicChangeDetection } from "@/lib/topic-change";
 import { alignExpectedWords, diffTranscript } from "@/lib/word-diff";
 import { extractUserInfo, mergeExtractedArrays } from "@/lib/user-extraction";
 
@@ -87,10 +89,9 @@ export async function submitIntentAnswer(answer: string) {
         learnerId: learner.id,
         role: "assistant",
         kind: "intent_question",
-        content:
-          clarity.follow_up_question
-            ? stripUiInstructions(clarity.follow_up_question)
-            : "Ek real situation batayein jahan aap English better bolna chahte hain.",
+        content: clarity.follow_up_question
+          ? stripUiInstructions(clarity.follow_up_question)
+          : intentFollowUpFallback(learner.selfDeclaredLevel),
       },
     });
 
@@ -138,8 +139,7 @@ export async function submitIntentAnswer(answer: string) {
       learnerId: learner.id,
       role: "assistant",
       kind: "topic_suggestion",
-      content:
-        "Bahut badhiya! Maine aapke liye personalized topic sequence banayi hai. Neeche se topic chuno ya bolo kya practice karna hai.",
+      content: topicSuggestionMessage(updatedLearner.selfDeclaredLevel),
     },
   });
 
@@ -414,6 +414,8 @@ async function handleMidLessonTopicChange(input: {
 
   await abandonActiveLesson(input.learnerId, input.activeTopicId);
 
+  const learner = await prisma.learnerProfile.findUnique({ where: { id: input.learnerId } });
+  const level = learner?.selfDeclaredLevel ?? null;
   const newTitle = input.detection.topicClear ? input.detection.newTopicTitle?.trim() : null;
   if (newTitle) {
     await prisma.chatMessage.create({
@@ -421,7 +423,7 @@ async function handleMidLessonTopicChange(input: {
         learnerId: input.learnerId,
         role: "assistant",
         kind: "topic_change_ack",
-        content: TOPIC_CHANGE_ACK_WITH_TITLE(newTitle),
+        content: topicChangeAckWithTitle(newTitle, level),
       },
     });
     return lockTopic({ freeformTitle: newTitle });
@@ -432,7 +434,7 @@ async function handleMidLessonTopicChange(input: {
       learnerId: input.learnerId,
       role: "assistant",
       kind: "topic_suggestion",
-      content: TOPIC_CHANGE_CLARIFY_MESSAGE,
+      content: topicChangeClarifyMessage(level),
     },
   });
 
@@ -579,6 +581,7 @@ async function deliverStepIntroChain(input: {
 
 async function completeTopic(learnerId: string, topicId: string) {
   const progress = await prisma.learnerProgress.findUnique({ where: { learnerId } });
+  const learner = await prisma.learnerProfile.findUnique({ where: { id: learnerId } });
   const completed = new Set(parseJsonArray(progress?.completedTopicIds));
   completed.add(topicId);
   await prisma.topic.update({
@@ -598,7 +601,7 @@ async function completeTopic(learnerId: string, topicId: string) {
       learnerId,
       role: "assistant",
       kind: "topic_complete",
-      content: "Topic complete ho gaya. Agla topic bataiye jise practice karna hai.",
+      content: topicCompleteMessage(learner?.selfDeclaredLevel),
     },
   });
 

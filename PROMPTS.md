@@ -853,7 +853,7 @@ These strings are stored or displayed as Riva assistant messages without an LLM 
 | New learner, no name | `Namaste! Main Riva hoon, aapki spoken English partner. Aapka naam kya hai?` | `profile_name_question`  |
 | Name not captured    | `{followUpQuestion}` or fallback `Aapka naam samajh nahi aaya. Main aapko kya bulaoon?` | `profile_name_question`  |
 | Name captured        | `Nice to meet you {name}. Main aapki English improve karne mein help karungi. Usse pehle mujhe aapka current English level batayein, taaki uske hisaab se main aapse baat kar saku.` | `profile_level_question` |
-| Level captured       | `Bahut badhiya! Main aapko simple steps mein English bolna sikhaungi. Pehle mujhe yeh batayein — aap English kyun seekhna chahte hain?` | `intent_question`        |
+| Level captured       | CEFR-banded via `intentQuestionAfterLevel(level)` in `lib/cefr-copy.ts` (A1–A2 Hinglish; C1–C2 English-leaning) | `intent_question`        |
 
 
 **File reference:** `ensureWelcomeMessage()`, `submitOnboardingAnswer()`
@@ -864,14 +864,7 @@ These strings are stored or displayed as Riva assistant messages without an LLM 
 
 **Function:** `buildWelcomeBackMessage()`
 
-**Template (parts joined with spaces):**
-
-1. `Wapas aaye aap, {displayName}!` — `{displayName}` = `learner.name ?? learner.username`
-2. Optional: `Aapka level {selfDeclaredLevel} hai.`
-3. Optional: `Aapka goal: {intentSummary}.`
-4. Optional: `Mujhe yaad hai aapko {interests.slice(0, 3) joined by ", "} pasand hai.`
-5. Optional: `{keyFacts[0..1 joined by space]}`
-6. Always: `Aaj kya practice karna chahte hain, ya jahan chhoda tha wahan se shuru karein?`
+**Template:** CEFR-banded via `buildWelcomeBackMessageForLevel()` in `lib/cefr-copy.ts` (A1–A2 Hinglish “Wapas aaye…”; C1–C2 “Welcome back…”).
 
 **File reference:** `ensureReturningWelcome()` — kind `welcome_back`
 
@@ -882,17 +875,17 @@ These strings are stored or displayed as Riva assistant messages without an LLM 
 
 | Trigger                          | Message                                                                                                                                    | Kind                                    |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
-| Intent unclear, no LLM follow-up | `Ek real situation batayein jahan aap English better bolna chahte hain.` | `intent_question` |
-| Intent clear, curriculum ready   | `Bahut badhiya! Maine aapke liye personalized topic sequence banayi hai. Neeche se topic chuno ya bolo kya practice karna hai.` | `topic_suggestion` |
+| Intent unclear, no LLM follow-up | CEFR-banded `intentFollowUpFallback(level)` (`lib/cefr-copy.ts`) | `intent_question` |
+| Intent clear, curriculum ready   | CEFR-banded `topicSuggestionMessage(level)` — C1 example: `Great — I've put together a personalized topic sequence for you. Pick a topic below, or tell me what you'd like to practice.` | `topic_suggestion` |
 | Topic locked (user message)      | `Let's practice {topic.title}.`                                                                                                            | `topic_choice` (stored as user role)    |
 | Mid-lesson topic change (user)   | Learner utterance (e.g. "change topic", "new topic: travel")                                                                               | `topic_change` (stored as user role)    |
-| Mid-lesson topic change (clear)  | `Theek hai, ab hum "{title}" practice karenge.`                                                                                            | `topic_change_ack`                      |
-| Mid-lesson topic change (vague)  | `Theek hai, topic change karte hain. Aap kya practice karna chahte ho? Neeche se topic chuno ya bolo kya seekhna hai.`                     | `topic_suggestion`                      |
+| Mid-lesson topic change (clear)  | CEFR-banded `topicChangeAckWithTitle(title, level)`                                                                                        | `topic_change_ack`                      |
+| Mid-lesson topic change (vague)  | CEFR-banded `topicChangeClarifyMessage(level)`                                                                                             | `topic_suggestion`                      |
 | Topic locked / next step         | `{deliverLessonTurn.spoken_reply}` or fallback                                                                                             | step type (`concept`, `question`, etc.) |
 | SAR question response            | `{deliverLessonTurn.spoken_reply}` or fallback                                                                                             | `sar_feedback`                          |
 | Open-ended response              | `{deliverLessonTurn.spoken_reply}` or fallback                                                                                             | `feedback`                              |
 | Concept/practice response        | `{deliverLessonTurn.spoken_reply}` or fallback                                                                                             | step type                               |
-| Topic completed                  | `Topic complete ho gaya. Agla topic bataiye jise practice karna hai.` | `topic_complete` |
+| Topic completed                  | CEFR-banded `topicCompleteMessage(level)` | `topic_complete` |
 
 
 **Note:** Lesson step `content` in the database is reference/objectives for the deliverer. Spoken messages during delivery are LLM-generated per turn via `deliverLessonTurn`, with fallback to plan content or rule-based SAR strings on LLM failure.
@@ -927,7 +920,7 @@ Rendered inside assistant message bubbles (not LLM-generated):
 | Component               | Text                                                            |
 | ----------------------- | --------------------------------------------------------------- |
 | `LevelSuggestions`      | `Apna current level chuno:`                                     |
-| `TopicSuggestions`      | `Neeche se topic chuno ya bolo kya practice karna hai.`         |
+| `TopicSuggestions`      | CEFR-banded `topicSuggestionsUiLabel(level)` (`lib/cefr-copy.ts`) |
 | `AssistantMessageBody` (SAR) | Prompt: `Is sentence ko repeat karein:`                         |
 | `RivaThinkingIndicator` | `Riva soch rahi hai...`                                         |
 

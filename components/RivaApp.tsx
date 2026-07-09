@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AppState, ChatMessageDto, LessonStepDto, QuestionCardMetadata } from "@/lib/domain";
 import { CEFR_LEVELS } from "@/lib/domain";
+import { topicSuggestionsUiLabel } from "@/lib/cefr-copy";
 import { SAR_QUESTION_PROMPT, stripUiInstructions } from "@/lib/content";
 import { buildAssistantSpeechSegments } from "@/lib/assistant-speech";
 import { sanitizeQuestionStepIntroReply } from "@/lib/lesson-delivery";
@@ -614,6 +615,7 @@ export function RivaApp() {
           {hasCurriculum && !hasActiveTopic ? (
             <TopicSuggestions
               topics={pendingTopics}
+              level={state?.profile.selfDeclaredLevel}
               disabled={Boolean(loading) || composerBusy}
               onSelectTopic={selectTopic}
             />
@@ -743,6 +745,7 @@ function LevelSuggestions(props: {
 
 function TopicSuggestions(props: {
   topics: AppState["topics"];
+  level?: string | null;
   disabled: boolean;
   onSelectTopic: (topicId: string) => void;
 }) {
@@ -755,8 +758,7 @@ function TopicSuggestions(props: {
       <div className="avatar">R</div>
       <div className="message assistant choice-message">
         <span className="message-meta">Riva</span>
-        <strong>Neeche se topic chuno ya bolo kya practice karna hai.</strong>
-        <div className="topic-grid">
+        <strong>{topicSuggestionsUiLabel(props.level)}</strong>        <div className="topic-grid">
           {props.topics.map((topic) => (
             <button
               key={topic.id}

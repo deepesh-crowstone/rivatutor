@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  detectTopicChangeIntent,
-  TOPIC_CHANGE_ACK_WITH_TITLE,
-  TOPIC_CHANGE_CLARIFY_MESSAGE,
-} from "@/lib/topic-change";
+import { topicChangeAckWithTitle, topicChangeClarifyMessage } from "@/lib/cefr-copy";
+import { detectTopicChangeIntent } from "@/lib/topic-change";
 import { topicChangeIntentSchema } from "@/lib/domain";
 
 describe("detectTopicChangeIntent", () => {
@@ -78,9 +75,10 @@ describe("detectTopicChangeIntent", () => {
 });
 
 describe("topic change copy helpers", () => {
-  it("keeps Hinglish acknowledgment and clarify messages", () => {
-    expect(TOPIC_CHANGE_ACK_WITH_TITLE("restaurants")).toContain("restaurants");
-    expect(TOPIC_CHANGE_CLARIFY_MESSAGE.toLowerCase()).toContain("topic");
+  it("adapts acknowledgment and clarify messages by CEFR band", () => {
+    expect(topicChangeAckWithTitle("restaurants", "A2")).toContain("restaurants");
+    expect(topicChangeClarifyMessage("A2").toLowerCase()).toContain("topic");
+    expect(topicChangeClarifyMessage("C1")).toContain("switch topics");
   });
 });
 

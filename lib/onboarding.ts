@@ -1,3 +1,4 @@
+import { intentQuestionAfterLevel } from "@/lib/cefr-copy";
 import { CEFR_LEVELS, type CefrLevel } from "@/lib/domain";
 import { prisma } from "@/lib/db";
 import { loadRecentConversation, updateProfileFromConversation } from "@/lib/profile-pipeline";
@@ -130,11 +131,9 @@ export async function submitOnboardingAnswer(answer: string) {
         learnerId: learner.id,
         role: "assistant",
         kind: "intent_question",
-        content:
-          "Bahut badhiya! Main aapko simple steps mein English bolna sikhaungi. Pehle mujhe yeh batayein — aap English kyun seekhna chahte hain?",
+        content: intentQuestionAfterLevel(level),
       },
     });
-
     // Profile enrichment must never block onboarding UI progression.
     void updateProfileFromConversation(learner.id).catch(() => {
       // Best-effort background enrichment.

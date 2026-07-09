@@ -1,3 +1,4 @@
+import { buildWelcomeBackMessageForLevel } from "@/lib/cefr-copy";
 import { prisma } from "@/lib/db";
 import { parseJsonArray } from "@/lib/json";
 import { ensureWelcomeMessage } from "@/lib/onboarding";
@@ -13,31 +14,15 @@ export function buildWelcomeBackMessage(learner: {
   userInterests: string;
   extractedKeyFacts: string;
 }): string {
-  const displayName = learner.name ?? learner.username;
-  const parts = [`Wapas aaye aap, ${displayName}!`];
-
-  if (learner.selfDeclaredLevel) {
-    parts.push(`Aapka level ${learner.selfDeclaredLevel} hai.`);
-  }
-
-  if (learner.intentSummary) {
-    parts.push(`Aapka goal: ${learner.intentSummary}.`);
-  }
-
-  const interests = parseJsonArray(learner.userInterests);
-  if (interests.length > 0) {
-    parts.push(`Mujhe yaad hai aapko ${interests.slice(0, 3).join(", ")} pasand hai.`);
-  }
-
-  const keyFacts = parseJsonArray(learner.extractedKeyFacts);
-  if (keyFacts.length > 0) {
-    parts.push(keyFacts.slice(0, 2).join(" "));
-  }
-
-  parts.push("Aaj kya practice karna chahte hain, ya jahan chhoda tha wahan se shuru karein?");
-  return parts.join(" ");
+  return buildWelcomeBackMessageForLevel({
+    name: learner.name,
+    username: learner.username,
+    selfDeclaredLevel: learner.selfDeclaredLevel,
+    intentSummary: learner.intentSummary,
+    interests: parseJsonArray(learner.userInterests),
+    keyFacts: parseJsonArray(learner.extractedKeyFacts),
+  });
 }
-
 async function ensureReturningWelcome(learnerId: string) {
   const learner = await prisma.learnerProfile.findUnique({ where: { id: learnerId } });
   if (!learner || !learner.name) {

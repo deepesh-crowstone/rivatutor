@@ -182,8 +182,10 @@ export function detectTopicChangeIntent(
   return { wantsChange: false, topicClear: false, newTopicTitle: null, confidence: "none" };
 }
 
+/** @deprecated Prefer `topicChangeClarifyMessage(level)` from `lib/cefr-copy`. */
 export const TOPIC_CHANGE_CLARIFY_MESSAGE =
   "Theek hai, topic change karte hain. Aap kya practice karna chahte ho? Neeche se topic chuno ya bolo kya seekhna hai.";
 
+/** @deprecated Prefer `topicChangeAckWithTitle(title, level)` from `lib/cefr-copy`. */
 export const TOPIC_CHANGE_ACK_WITH_TITLE = (title: string) =>
   `Theek hai, ab hum "${title}" practice karenge.`;
