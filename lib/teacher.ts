@@ -4,6 +4,7 @@ import { stripReadyBoliyeFromSpeech } from "@/lib/assistant-speech";
 import {
   buildFallbackLessonDelivery,
   formatRecentConversation,
+  mergeChainedSpokenReplies,
   resolveAssistantMessageKind,
   resolveDeliverableStep,
   resolveOpenEndedQuestionPrompt,
@@ -497,6 +498,10 @@ async function deliverStepIntroChain(input: {
   });
   const stepReferences = allSteps.map(toStepReference);
   let order = input.startOrder;
+  const spokenParts: string[] = [];
+  let finalStep: DbLessonStep | null = null;
+  let finalDelivery: LessonDeliveryResult | null = null;
+  let completedRecap = false;
 
   while (true) {
     const { step: deliverableReference, skippedOrders } = resolveDeliverableStep(stepReferences, order);
@@ -519,45 +524,58 @@ async function deliverStepIntroChain(input: {
       nextStep: nextStepReference,
     });
 
-    await prisma.chatMessage.create({
-      data: {
-        learnerId: input.learnerId,
-        topicId: input.topic.id,
-        role: "assistant",
-        kind: resolveStepIntroAssistantKind(stepReference),
-        content:
-          step.type === "question" && step.questionType === "open_ended"
-            ? sanitizeQuestionStepIntroReply(stepReference, delivery.spoken_reply)
-            : delivery.spoken_reply,
-        metadata: buildStepMessageMetadata(step, { delivery }),
-      },
-    });
+    const spoken =
+      step.type === "question" && step.questionType === "open_ended"
+        ? sanitizeQuestionStepIntroReply(stepReference, delivery.spoken_reply)
+        : delivery.spoken_reply;
+    spokenParts.push(spoken);
+    finalStep = step;
+    finalDelivery = delivery;
 
     const shouldChain = shouldChainStepIntro(stepReference);
 
     if (shouldChain) {
       await prisma.lessonStep.update({ where: { id: step.id }, data: { completed: true } });
       if (step.type === "recap") {
-        return completeTopic(input.learnerId, input.topic.id);
+        completedRecap = true;
+        break;
       }
       if (!nextStepReference) {
-        await prisma.learnerProgress.update({
-          where: { learnerId: input.learnerId },
-          data: { currentStepOrder: step.order },
-        });
-        return getAppState();
+        break;
       }
       order = nextStepReference.order;
       continue;
     }
 
-    await prisma.learnerProgress.update({
-      where: { learnerId: input.learnerId },
-      data: { currentStepOrder: step.order },
-    });
-
-    return getAppState();
+    break;
   }
+
+  if (!finalStep || !finalDelivery) {
+    throw new Error("Riva could not deliver the lesson intro.");
+  }
+
+  const finalReference = toStepReference(finalStep);
+  await prisma.chatMessage.create({
+    data: {
+      learnerId: input.learnerId,
+      topicId: input.topic.id,
+      role: "assistant",
+      kind: resolveStepIntroAssistantKind(finalReference),
+      content: mergeChainedSpokenReplies(spokenParts),
+      metadata: buildStepMessageMetadata(finalStep, { delivery: finalDelivery }),
+    },
+  });
+
+  if (completedRecap) {
+    return completeTopic(input.learnerId, input.topic.id);
+  }
+
+  await prisma.learnerProgress.update({
+    where: { learnerId: input.learnerId },
+    data: { currentStepOrder: finalStep.order },
+  });
+
+  return getAppState();
 }
 
 async function completeTopic(learnerId: string, topicId: string) {

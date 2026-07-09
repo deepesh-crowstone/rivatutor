@@ -363,6 +363,14 @@ export function shouldChainStepIntro(step: Pick<LessonPlanStepReference, "type">
   return step.type === "concept" || step.type === "practice" || step.type === "recap";
 }
 
+/** Join multiple chained intro replies into one spoken message for the chat UI. */
+export function mergeChainedSpokenReplies(parts: string[]): string {
+  return parts
+    .map((part) => stripUiInstructions(part).replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 /** Skip concept/practice intros only when they duplicate the next question's SAR target. */
 export function shouldSkipStepIntro(
   step: Pick<LessonPlanStepReference, "type" | "content">,

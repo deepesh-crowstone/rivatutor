@@ -11,6 +11,7 @@ import {
   resolveStepIntroAssistantKind,
   sanitizeQuestionStepIntroReply,
   shouldAdvanceAfterDelivery,
+  mergeChainedSpokenReplies,
   shouldChainStepIntro,
   shouldCreateSarRetryQuestionCard,
   shouldPersistLessonAnswerUserMessage,
@@ -294,6 +295,24 @@ describe("shouldChainStepIntro", () => {
 
   it("stops chaining on question intros", () => {
     expect(shouldChainStepIntro({ type: "question" })).toBe(false);
+  });
+});
+
+describe("mergeChainedSpokenReplies", () => {
+  it("joins multiple intro parts into one message", () => {
+    expect(
+      mergeChainedSpokenReplies([
+        "Silence is a strategic tool.",
+        "Think of pauses as punctuation.",
+        "Let's try a real scenario.",
+      ]),
+    ).toBe(
+      "Silence is a strategic tool. Think of pauses as punctuation. Let's try a real scenario.",
+    );
+  });
+
+  it("drops empty parts", () => {
+    expect(mergeChainedSpokenReplies(["First.", "  ", "Second."])).toBe("First. Second.");
   });
 });
 
