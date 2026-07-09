@@ -30,11 +30,17 @@ const STRONG_CHANGE_PATTERNS: RegExp[] = [
   /\bhum\s+topic\s+change\b/i,
 ];
 
+/** Explicit "let's practice/do/learn X" — strong when X differs from the active topic. */
+const LETS_PRACTICE_PATTERN =
+  /\b(?:let'?s|lets|shall\s+we|can\s+we|we\s+should)\s+(?:do|learn|practice|study|try|cover|work\s+on)\s+(.+)$/i;
+
 const TITLE_EXTRACTION_PATTERNS: RegExp[] = [
   /\b(?:new\s+topic|topic)\s*[:\-]\s*(.+)$/i,
   /\b(?:change|switch)\s+(?:the\s+)?topic\s+to\s+(.+)$/i,
   /\b(?:i\s+want\s+to\s+learn|want\s+to\s+learn|learn)\s+about\s+(.+?)(?:\s+instead)?$/i,
-  /\b(?:let'?s|lets)\s+(?:do|learn|practice|study)\s+(.+?)(?:\s+instead)?$/i,
+  LETS_PRACTICE_PATTERN,
+  /\b(?:i\s+want\s+to|want\s+to)\s+(?:do|learn|practice|study)\s+(.+?)(?:\s+instead)?$/i,
+  /\b(?:practice|study)\s+(.+)$/i,
   /\b(?:ab|chalo|chaliye)\s+(.+?)\s+(?:seekhte|karte|practice)\b/i,
   /\binstead\s+(?:of\s+this[,.]?\s*)?(?:let'?s\s+)?(?:do|learn|practice)?\s*(.+)$/i,
   /\biske\s+bajaye\s+(.+)$/i,
@@ -88,7 +94,7 @@ function cleanExtractedTitle(raw: string): string | null {
   }
 
   // Reject answers that look like full spoken sentences answering a prompt.
-  if (title.split(/\s+/).length > 8) {
+  if (title.split(/\s+/).length > 12) {
     return null;
   }
 
@@ -140,12 +146,13 @@ export function detectTopicChangeIntent(
   const strongHit = STRONG_CHANGE_PATTERNS.some((pattern) => pattern.test(trimmed));
   const extracted = extractTitle(trimmed);
   const softLearnHit = SOFT_LEARN_ABOUT_PATTERN.test(trimmed);
+  const letsPracticeHit = LETS_PRACTICE_PATTERN.test(trimmed);
+  const differentFromCurrent =
+    Boolean(extracted) &&
+    (!currentTopicTitle || !topicsLikelySame(extracted!, currentTopicTitle));
 
   if (strongHit) {
-    const title =
-      extracted && currentTopicTitle && topicsLikelySame(extracted, currentTopicTitle)
-        ? null
-        : extracted;
+    const title = differentFromCurrent ? extracted : null;
     return {
       wantsChange: true,
       topicClear: Boolean(title),
@@ -154,9 +161,19 @@ export function detectTopicChangeIntent(
     };
   }
 
-  if (extracted && currentTopicTitle && !topicsLikelySame(extracted, currentTopicTitle)) {
-    // Soft: "I want to learn about X" / "let's do X" while another topic is active.
-    if (softLearnHit || /\b(?:let'?s|lets)\s+(?:do|learn|practice|study)\b/i.test(trimmed)) {
+  // "Let's practice Casual Travel Conversations" while another topic is active —
+  // treat as a strong switch so the LLM classifier cannot keep the old lesson.
+  if (letsPracticeHit && differentFromCurrent) {
+    return {
+      wantsChange: true,
+      topicClear: true,
+      newTopicTitle: extracted,
+      confidence: "strong",
+    };
+  }
+
+  if (extracted && differentFromCurrent) {
+    if (softLearnHit || /\b(?:want\s+to|i\s+want)\s+(?:do|learn|practice|study)\b/i.test(trimmed)) {
       return {
         wantsChange: true,
         topicClear: true,
@@ -166,11 +183,7 @@ export function detectTopicChangeIntent(
     }
   }
 
-  if (
-    softLearnHit &&
-    extracted &&
-    (!currentTopicTitle || !topicsLikelySame(extracted, currentTopicTitle))
-  ) {
+  if (softLearnHit && differentFromCurrent) {
     return {
       wantsChange: true,
       topicClear: true,

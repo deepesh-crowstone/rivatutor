@@ -366,6 +366,12 @@ async function resolveTopicChangeIntent(input: {
     return heuristic;
   }
 
+  // Soft heuristic already named a concrete different topic — switch immediately.
+  // Do not let a cautious LLM classifier keep the learner stuck on the old lesson.
+  if (heuristic.wantsChange && heuristic.topicClear && heuristic.newTopicTitle) {
+    return heuristic;
+  }
+
   try {
     const classified = await classifyTopicChangeIntent({
       learnerUtterance: input.utterance,
