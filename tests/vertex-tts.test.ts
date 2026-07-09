@@ -63,10 +63,11 @@ describe("TTS env parsing", () => {
     });
   });
 
-  it("requires only openrouter key when openrouter TTS is selected", () => {
+  it("requires only openrouter key when openrouter TTS and STT are selected", () => {
     process.env.TTS_PROVIDER = "openrouter";
+    process.env.STT_PROVIDER = "openrouter";
     process.env.OPENROUTER_API_KEY = "llm";
-    process.env.ELEVENLABS_API_KEY = "stt";
+    delete process.env.ELEVENLABS_API_KEY;
     delete process.env.VERTEX_API_KEY;
 
     expect(hasRequiredApiKeys()).toBe(true);
@@ -74,8 +75,9 @@ describe("TTS env parsing", () => {
 
   it("requires vertex key when vertex TTS is selected", () => {
     process.env.TTS_PROVIDER = "vertex";
+    process.env.STT_PROVIDER = "openrouter";
     process.env.OPENROUTER_API_KEY = "llm";
-    process.env.ELEVENLABS_API_KEY = "stt";
+    delete process.env.ELEVENLABS_API_KEY;
     delete process.env.VERTEX_API_KEY;
 
     expect(hasRequiredApiKeys()).toBe(false);
@@ -86,8 +88,9 @@ describe("TTS env parsing", () => {
 
   it("does not require vertex key when elevenlabs TTS is selected", () => {
     process.env.TTS_PROVIDER = "elevenlabs";
+    process.env.STT_PROVIDER = "openrouter";
     process.env.OPENROUTER_API_KEY = "llm";
-    process.env.ELEVENLABS_API_KEY = "stt";
+    process.env.ELEVENLABS_API_KEY = "tts";
     delete process.env.VERTEX_API_KEY;
 
     expect(hasRequiredApiKeys()).toBe(true);

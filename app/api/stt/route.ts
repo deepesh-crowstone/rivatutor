@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
-import { transcribeAudio } from "@/lib/elevenlabs";
+import { transcribeAudio } from "@/lib/stt";
 
 export const runtime = "nodejs";
 
@@ -26,6 +26,8 @@ export async function POST(request: Request) {
     const text = await transcribeAudio({
       file: audio,
       filename: audio.name || `riva-answer.${format}`,
+      format,
+      request,
     });
 
     return NextResponse.json({ text });

@@ -598,9 +598,9 @@ export function RivaApp() {
         <div className="chat-body">
           {state?.missingApiKey ? (
             <div className="notice">
-              Add `OPENROUTER_API_KEY` (LLM + default TTS), `ELEVENLABS_API_KEY` (STT), and
-              `VERTEX_API_KEY` (only when `TTS_PROVIDER=vertex`) to `.env` before using AI and speech
-              features.
+              Add `OPENROUTER_API_KEY` (LLM + default TTS + default STT via `google/chirp-3`).
+              Set `ELEVENLABS_API_KEY` only if `STT_PROVIDER=elevenlabs` or `TTS_PROVIDER=elevenlabs`,
+              and `VERTEX_API_KEY` only when `TTS_PROVIDER=vertex`.
             </div>
           ) : null}
           {error ? <div className="error">{error}</div> : null}

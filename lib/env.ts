@@ -82,6 +82,7 @@ export function requireOpenRouterApiKey(): string {
 }
 
 export type TtsProvider = "openrouter" | "vertex" | "elevenlabs";
+export type SttProvider = "openrouter" | "elevenlabs";
 
 export function getTtsProvider(): TtsProvider {
   const provider = (process.env.TTS_PROVIDER ?? "openrouter").trim().toLowerCase();
@@ -92,6 +93,22 @@ export function getTtsProvider(): TtsProvider {
     return "vertex";
   }
   return "openrouter";
+}
+
+export function getSttProvider(): SttProvider {
+  const provider = (process.env.STT_PROVIDER ?? "openrouter").trim().toLowerCase();
+  if (provider === "elevenlabs") {
+    return "elevenlabs";
+  }
+  return "openrouter";
+}
+
+export function getOpenRouterSttConfig() {
+  return {
+    model: process.env.OPENROUTER_STT_MODEL ?? "google/chirp-3",
+    // ISO-639-1 for OpenRouter STT; omit/empty lets the provider auto-detect.
+    language: (process.env.OPENROUTER_STT_LANGUAGE ?? "en").trim() || undefined,
+  };
 }
 
 export function getOpenRouterTtsConfig() {
@@ -136,14 +153,24 @@ export function getElevenLabsConfig() {
 export function requireElevenLabsApiKey(): string {
   const { apiKey } = getElevenLabsConfig();
   if (!apiKey) {
-    throw new Error("ELEVENLABS_API_KEY is required for speech-to-text.");
+    throw new Error(
+      "ELEVENLABS_API_KEY is required when STT_PROVIDER=elevenlabs or TTS_PROVIDER=elevenlabs.",
+    );
   }
 
   return apiKey;
 }
 
 export function hasRequiredApiKeys() {
-  if (!getOpenRouterConfig().apiKey || !getElevenLabsConfig().apiKey) {
+  if (!getOpenRouterConfig().apiKey) {
+    return false;
+  }
+
+  if (getSttProvider() === "elevenlabs" && !getElevenLabsConfig().apiKey) {
+    return false;
+  }
+
+  if (getTtsProvider() === "elevenlabs" && !getElevenLabsConfig().apiKey) {
     return false;
   }
 

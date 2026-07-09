@@ -6,7 +6,7 @@ This guide covers deploying the [rivatutor](https://github.com/deepesh-crowstone
 
 - GitHub repo pushed and up to date
 - Railway account
-- API keys: [OpenRouter](https://openrouter.ai), [ElevenLabs](https://elevenlabs.io) (required for STT)
+- API keys: [OpenRouter](https://openrouter.ai) (LLM + default TTS + default STT). [ElevenLabs](https://elevenlabs.io) only if you set `STT_PROVIDER=elevenlabs` or `TTS_PROVIDER=elevenlabs`.
 - Optional: Google AI / Vertex API key if using `TTS_PROVIDER=vertex`
 
 ## Quick start
@@ -61,8 +61,7 @@ Copy from `.env.example` and set these in Railway → your service → **Variabl
 
 | Variable | Description |
 |----------|-------------|
-| `OPENROUTER_API_KEY` | OpenRouter API key for LLM chat |
-| `ELEVENLABS_API_KEY` | ElevenLabs key (always used for speech-to-text) |
+| `OPENROUTER_API_KEY` | OpenRouter API key for LLM, default TTS, and default STT (`google/chirp-3`) |
 | `DATABASE_URL` | **Required on web service:** `${{Postgres.DATABASE_URL}}` (recommended). Do not use `file:./dev.db` on Railway. |
 
 ### Recommended for production
@@ -72,6 +71,7 @@ Copy from `.env.example` and set these in Railway → your service → **Variabl
 | `OPENROUTER_SITE_URL` | `http://localhost:3000` | Your public Railway URL (e.g. `https://rivatutor.up.railway.app`). **Optional:** if unset or still `localhost`, the app derives `https://<request-host>` from Railway proxy headers for OpenRouter `HTTP-Referer`. |
 | `OPENROUTER_APP_TITLE` | `Riva Teacher POC` | App name sent to OpenRouter |
 | `TTS_PROVIDER` | `openrouter` | `openrouter`, `vertex`, or `elevenlabs` |
+| `STT_PROVIDER` | `openrouter` | `openrouter` (Chirp 3) or `elevenlabs` |
 
 ### Text-to-speech (by provider)
 
@@ -100,10 +100,20 @@ Copy from `.env.example` and set these in Railway → your service → **Variabl
 | `ELEVENLABS_TTS_MODEL` | `eleven_multilingual_v2` |
 | `ELEVENLABS_TTS_OUTPUT_FORMAT` | `mp3_44100_128` |
 
-### Speech-to-text (always ElevenLabs)
+### Speech-to-text
+
+**OpenRouter STT** (`STT_PROVIDER=openrouter`, default):
 
 | Variable | Default |
 |----------|---------|
+| `OPENROUTER_STT_MODEL` | `google/chirp-3` |
+| `OPENROUTER_STT_LANGUAGE` | `en` (ISO-639-1; empty = auto-detect) |
+
+**ElevenLabs STT** (`STT_PROVIDER=elevenlabs`):
+
+| Variable | Default |
+|----------|---------|
+| `ELEVENLABS_API_KEY` | *(required for this provider)* |
 | `ELEVENLABS_STT_MODEL` | `scribe_v2` |
 | `ELEVENLABS_STT_LANGUAGE` | `eng` |
 
@@ -173,7 +183,7 @@ npm start
 | Build fails on `better-sqlite3` | Prefer PostgreSQL on Railway; or retry deploy (Nixpacks needs native build tools). |
 | Build fails with Prisma adapter/provider mismatch | Ensure `prepare-database` and runtime use the same provider. On Railway, `PRISMA_PROVIDER=postgresql` is set in `railway.toml`. Locally, set `DATABASE_URL` in `.env` before `npm run build`, or export `PRISMA_PROVIDER`. |
 | `OPENROUTER_API_KEY is required` | Set the variable in Railway and redeploy. This should only appear at **runtime** in API routes, not during `next build`. |
-| `ELEVENLABS_API_KEY is required` | Set the variable in Railway and redeploy. |
+| `ELEVENLABS_API_KEY is required` | Only needed when `STT_PROVIDER=elevenlabs` or `TTS_PROVIDER=elevenlabs`. |
 | Data disappears after deploy | You’re on ephemeral SQLite without a volume — switch to PostgreSQL. |
 | Prisma / DB errors on start | Ensure `DATABASE_URL` is set and Postgres service is running; check **Deploy Logs** for `releaseCommand` output. |
 | 502 / app not listening | Confirm `startCommand` is `npm start` and `PORT` is not overridden incorrectly. |
