@@ -4,8 +4,8 @@ export type TopicChangeDetection = {
   topicClear: boolean;
   /** Normalized freeform title when a concrete topic was named. */
   newTopicTitle: string | null;
-  /** Heuristic confidence: strong skips LLM; soft may consult LLM. */
-  confidence: "strong" | "soft" | "none";
+  /** Source of the decision: llm is primary; strong/soft are heuristic fallback only. */
+  confidence: "llm" | "strong" | "soft" | "none";
 };
 
 const STRONG_CHANGE_PATTERNS: RegExp[] = [
@@ -135,8 +135,9 @@ function topicsLikelySame(a: string, b: string): boolean {
 }
 
 /**
- * Detect mid-lesson requests to abandon the current topic and switch.
- * Strong matches are safe to act on without an LLM; soft matches may need classification.
+ * Heuristic fallback for mid-lesson topic-change detection.
+ * Primary path is `classifyTopicChangeIntent` (LLM) in `resolveTopicChangeIntent`.
+ * Use this only when the LLM classifier fails.
  */
 export function detectTopicChangeIntent(
   utterance: string,

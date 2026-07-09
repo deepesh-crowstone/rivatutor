@@ -256,14 +256,23 @@ export async function classifyTopicChangeIntent(input: {
       {
         role: "system",
         content:
-          `You are Riva's Topic-Change Intent Classifier. Decide if the learner wants to abandon the current mid-lesson topic and switch to a different practice topic.
+          `You are Riva's Topic-Change Intent Classifier. Decide if the learner wants to abandon the CURRENT mid-lesson topic and practice a DIFFERENT subject instead.
 
-Set wants_topic_change true ONLY when they clearly ask to change/switch/leave the current topic, demand a new topic, or name a different subject to practice instead.
+Set wants_topic_change TRUE when the utterance's intent is to leave the current lesson topic — including casual or indirect phrasing. Examples that SHOULD be true (if the named subject differs from the current topic):
+- "change topic", "something else", "kuch aur", "topic badlo"
+- "let's practice travel conversations", "i wanna practice interviews", "can we do restaurants"
+- "I want to learn about airports instead", "switch to small talk"
+- Naming a clearly different practice subject while a lesson is already active
 
-Set wants_topic_change false for normal lesson answers, SAR repeats, open-ended practice replies, clarifications about the current topic, or continue/ready phrases.
+Set wants_topic_change FALSE for:
+- Normal lesson answers (repeating a sentence, answering an open-ended prompt about the CURRENT topic)
+- Clarifications, questions, or elaborations about the current topic
+- Continue / ready / next / ok / got it style advance phrases
+- Utterances that stay on the same topic (even if they say "practice" or "learn")
 
-If they name a concrete replacement topic (e.g. restaurants, travel, interviews), set topic_clear true and put a short title in new_topic_title.
-If they only say something vague like "something else" / "kuch aur" / "change topic" without naming what, set topic_clear false and new_topic_title null.
+If they name a concrete replacement topic, set topic_clear true and put a short clean title in new_topic_title (2–6 words, no full sentence).
+If they only ask to change without naming what (e.g. "something else", "change topic"), set topic_clear false and new_topic_title null.
+If the named topic is essentially the same as the current topic, set wants_topic_change false.
 
 acknowledgment should be one short sentence acknowledging the switch matching the CEFR language rule (English only for C1–C2; Hinglish for A1–B2; or empty if wants_topic_change is false). ${RIVA_DELIVERY_RULE} ${languageRules} Return only JSON.${contextBlock}`,
       },
@@ -275,7 +284,7 @@ Current step: ${input.currentStepSummary}
 Latest learner utterance:
 ${input.learnerUtterance}
 
-Return JSON:
+Decide from intent (not keyword matching). Return JSON:
 {
   "wants_topic_change": false,
   "new_topic_title": null,

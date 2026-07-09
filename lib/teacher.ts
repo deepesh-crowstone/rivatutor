@@ -26,7 +26,8 @@ import {
   topicCompleteMessage,
   topicSuggestionMessage,
 } from "@/lib/cefr-copy";
-import { detectTopicChangeIntent, type TopicChangeDetection } from "@/lib/topic-change";
+import { resolveTopicChangeFromClassifier } from "@/lib/topic-change-resolve";
+import type { TopicChangeDetection } from "@/lib/topic-change";
 import { alignExpectedWords, diffTranscript } from "@/lib/word-diff";
 import { extractUserInfo, mergeExtractedArrays } from "@/lib/user-extraction";
 
@@ -361,45 +362,19 @@ async function resolveTopicChangeIntent(input: {
   currentStep: DbLessonStep;
   learnerContext: ReturnType<typeof toLearnerContext>;
 }): Promise<TopicChangeDetection> {
-  const heuristic = detectTopicChangeIntent(input.utterance, input.currentTopicTitle);
-  if (heuristic.confidence === "strong" || heuristic.confidence === "none") {
-    return heuristic;
-  }
-
-  // Soft heuristic already named a concrete different topic — switch immediately.
-  // Do not let a cautious LLM classifier keep the learner stuck on the old lesson.
-  if (heuristic.wantsChange && heuristic.topicClear && heuristic.newTopicTitle) {
-    return heuristic;
-  }
-
-  try {
-    const classified = await classifyTopicChangeIntent({
-      learnerUtterance: input.utterance,
-      currentTopicTitle: input.currentTopicTitle,
-      currentStepSummary: `${input.currentStep.type}${
-        input.currentStep.questionType ? `/${input.currentStep.questionType}` : ""
-      }: ${input.currentStep.content.slice(0, 160)}`,
-      learnerContext: input.learnerContext,
-    });
-
-    if (!classified.wants_topic_change) {
-      return { wantsChange: false, topicClear: false, newTopicTitle: null, confidence: "none" };
-    }
-
-    const title = classified.topic_clear
-      ? classified.new_topic_title?.trim() || heuristic.newTopicTitle
-      : null;
-
-    return {
-      wantsChange: true,
-      topicClear: Boolean(title),
-      newTopicTitle: title,
-      confidence: "soft",
-    };
-  } catch {
-    // Soft heuristic alone is enough to proceed when the LLM classifier fails.
-    return heuristic;
-  }
+  return resolveTopicChangeFromClassifier({
+    utterance: input.utterance,
+    currentTopicTitle: input.currentTopicTitle,
+    classify: () =>
+      classifyTopicChangeIntent({
+        learnerUtterance: input.utterance.trim(),
+        currentTopicTitle: input.currentTopicTitle,
+        currentStepSummary: `${input.currentStep.type}${
+          input.currentStep.questionType ? `/${input.currentStep.questionType}` : ""
+        }: ${input.currentStep.content.slice(0, 160)}`,
+        learnerContext: input.learnerContext,
+      }),
+  });
 }
 
 async function handleMidLessonTopicChange(input: {

@@ -13,7 +13,7 @@ Complete inventory of LLM prompts, shared delivery rules, fallback delivery copy
 | 2   | `planCurriculum`                         | `lib/ai.ts`               | LLM (system + user)     | **Active** — first curriculum generation after intent is clear  |
 | 3   | `createLessonPlan`                       | `lib/ai.ts`               | LLM (system + user)     | **Active** — reference plan on topic lock (not verbatim script) |
 | 4   | `deliverLessonTurn`                      | `lib/ai.ts`               | LLM (system + user)     | **Active** — adaptive spoken delivery each lesson turn          |
-| 4b  | `classifyTopicChangeIntent`              | `lib/ai.ts`               | LLM (system + user)     | **Active** — soft mid-lesson topic-change confirmation          |
+| 4b  | `classifyTopicChangeIntent`              | `lib/ai.ts`               | LLM (system + user)     | **Active** — primary mid-lesson topic-change intent detection   |
 | 5   | `extractUserInfo` (system)               | `lib/user-extraction.ts`  | LLM system prompt       | **Active** — goals `name`, `level`, `intent` only               |
 | 6   | `extractUserInfo` goal: `name`           | `lib/user-extraction.ts`  | LLM user instructions   | **Active** — onboarding name capture                            |
 | 7   | `extractUserInfo` goal: `level`          | `lib/user-extraction.ts`  | LLM user instructions   | **Active** — onboarding level capture                           |
@@ -69,7 +69,7 @@ deliverLessonTurn  ──►  spoken_reply stored as assistant chat message
   - **`learner_response`** — learner answered a step (`submitLessonAnswer`); includes SAR grading and open-ended feedback (no separate feedback LLM)
 - The deliverer receives the full plan JSON, current step definition, recent conversation (last 16 topic messages), learner profile context, and optional SAR grading. It returns `spoken_reply` plus `advance_step` / `reteach_current_step`.
 - **`lib/teacher.ts`** marks a step completed and calls `advanceLesson()` only when `shouldAdvanceAfterDelivery()` is true (`advance_step && !reteach_current_step`).
-- **Mid-lesson topic change:** before normal delivery, `submitLessonAnswer` runs `detectTopicChangeIntent` (and optionally `classifyTopicChangeIntent`). On a confirmed change it abandons the current lesson and either locks a new topic or re-enters topic selection — it does not continue old lesson steps.
+- **Mid-lesson topic change:** before normal delivery, `submitLessonAnswer` runs `classifyTopicChangeIntent` (LLM-first). Heuristic `detectTopicChangeIntent` is fallback only if the LLM call fails. On a confirmed change it abandons the current lesson and either locks a new topic or re-enters topic selection — it does not continue old lesson steps.
 
 ### SAR grading
 
@@ -517,24 +517,23 @@ Guidance:
 
 ### 4b. `classifyTopicChangeIntent`
 
-**Status:** Active  
-**Called from:** `lib/teacher.ts` → `resolveTopicChangeIntent()` (only for soft heuristic matches during `submitLessonAnswer`)
+**Status:** Active — **primary** mid-lesson topic-change detector  
+**Called from:** `lib/teacher.ts` → `resolveTopicChangeIntent()` on every lesson answer
 
-**Related (non-LLM):** `detectTopicChangeIntent()` in `lib/topic-change.ts` handles strong phrases (`change topic`, `new topic: …`, `kuch aur`, etc.) without calling the model.
+**Fallback (non-LLM):** `detectTopicChangeIntent()` in `lib/topic-change.ts` runs only if the LLM classifier throws/fails.
 
 #### System prompt
 
 ```
-You are Riva's Topic-Change Intent Classifier. Decide if the learner wants to abandon the current mid-lesson topic and switch to a different practice topic.
+You are Riva's Topic-Change Intent Classifier. Decide if the learner wants to abandon the CURRENT mid-lesson topic and practice a DIFFERENT subject instead.
 
-Set wants_topic_change true ONLY when they clearly ask to change/switch/leave the current topic, demand a new topic, or name a different subject to practice instead.
+Set wants_topic_change TRUE for leave/switch intent — including casual phrasing ("i wanna practice travel", "let's do interviews", "kuch aur").
+Set wants_topic_change FALSE for normal lesson answers about the CURRENT topic, continue/ready phrases, or same-topic elaborations.
 
-Set wants_topic_change false for normal lesson answers, SAR repeats, open-ended practice replies, clarifications about the current topic, or continue/ready phrases.
+If they name a concrete replacement topic, set topic_clear true and a short new_topic_title.
+If vague ("change topic" / "something else"), topic_clear false and new_topic_title null.
 
-If they name a concrete replacement topic (e.g. restaurants, travel, interviews), set topic_clear true and put a short title in new_topic_title.
-If they only say something vague like "something else" / "kuch aur" / "change topic" without naming what, set topic_clear false and new_topic_title null.
-
-acknowledgment should be one short sentence acknowledging the switch matching the CEFR Hinglish mix (or empty if wants_topic_change is false). {RIVA_DELIVERY_RULE} {formatLanguageRulesForPrompt(selfDeclaredLevel)} Return only JSON.{contextBlock}
+acknowledgment matches CEFR language rule. {RIVA_DELIVERY_RULE} {formatLanguageRulesForPrompt(selfDeclaredLevel)} Return only JSON.{contextBlock}
 ```
 
 #### User prompt
@@ -546,12 +545,12 @@ Current step: {currentStepSummary}
 Latest learner utterance:
 {learnerUtterance}
 
-Return JSON:
+Decide from intent (not keyword matching). Return JSON:
 {
   "wants_topic_change": false,
   "new_topic_title": null,
   "topic_clear": false,
-  "acknowledgment": "optional short Hinglish ack"
+  "acknowledgment": "optional short ack matching CEFR language rule"
 }
 ```
 
@@ -935,7 +934,7 @@ lockTopic
   └─ deliverStepTurn(step_intro) → deliverLessonTurn | buildFallbackLessonDelivery
 
 submitLessonAnswer
-  ├─ detectTopicChangeIntent (+ classifyTopicChangeIntent for soft matches)
+  ├─ classifyTopicChangeIntent (LLM-first; heuristic fallback only on LLM failure)
   │    ├─ clear title → abandonActiveLesson → topic_change_ack → lockTopic(freeformTitle)
   │    └─ vague → abandonActiveLesson → topic_suggestion clarify (re-enter topic selection)
   ├─ diffTranscript (SAR steps only)
@@ -954,7 +953,7 @@ submitLessonAnswer
 | `planCurriculum`                     | Active | Runs once when topic list is empty                         |
 | `createLessonPlan`                   | Active | Lazy-created per topic; plan content = deliverer reference |
 | `deliverLessonTurn`                  | Active | Every lesson spoken turn (intro, SAR feedback, open-ended feedback) |
-| `classifyTopicChangeIntent`          | Active | Soft mid-lesson topic-change confirmation (after heuristic)        |
+| `classifyTopicChangeIntent`          | Active | Primary mid-lesson topic-change intent detection (LLM-first)       |
 | `extractUserInfo` → `name`           | Active | Onboarding via `extractNameFromAnswer` + regex fallback    |
 | `extractUserInfo` → `level`          | Active | `resolveLearnerLevel` fallback when `parseCefrLevel` fails |
 | `extractUserInfo` → `intent`         | Active | Intent answer enrichment before clarity judge              |
