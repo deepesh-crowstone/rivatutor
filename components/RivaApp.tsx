@@ -607,19 +607,7 @@ export function RivaApp() {
           {!state && loading ? (
             <StageLoader label={loading} />
           ) : (
-            <>
-              <MessageList messages={displayMessages} currentStep={state?.currentStep ?? null} />
-              {loading || composerPhase === "waitingForRiva" || composerPhase === "transcribing" ? (
-                <RivaThinkingIndicator
-                  label={
-                    loading ||
-                    (composerPhase === "transcribing"
-                      ? "Transcribe ho raha hai..."
-                      : "Riva soch rahi hai...")
-                  }
-                />
-              ) : null}
-            </>
+            <MessageList messages={displayMessages} currentStep={state?.currentStep ?? null} />
           )}
 
           {needsLevel ? (
@@ -632,6 +620,18 @@ export function RivaApp() {
               level={state?.profile.selfDeclaredLevel}
               disabled={Boolean(loading) || composerBusy}
               onSelectTopic={selectTopic}
+            />
+          ) : null}
+
+          {state &&
+          (loading || composerPhase === "waitingForRiva" || composerPhase === "transcribing") ? (
+            <RivaThinkingIndicator
+              label={
+                loading ||
+                (composerPhase === "transcribing"
+                  ? "Transcribe ho raha hai..."
+                  : "Riva soch rahi hai...")
+              }
             />
           ) : null}
           <div ref={scrollAnchorRef} className="chat-scroll-anchor" aria-hidden="true" />
