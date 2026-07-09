@@ -603,10 +603,24 @@ export function RivaApp() {
             </div>
           ) : null}
           {error ? <div className="error">{error}</div> : null}
-          {loading ? <div className="notice">{loading}</div> : null}
 
-          <MessageList messages={displayMessages} currentStep={state?.currentStep ?? null} />
-          {composerPhase === "waitingForRiva" ? <RivaThinkingIndicator /> : null}
+          {!state && loading ? (
+            <StageLoader label={loading} />
+          ) : (
+            <>
+              <MessageList messages={displayMessages} currentStep={state?.currentStep ?? null} />
+              {loading || composerPhase === "waitingForRiva" || composerPhase === "transcribing" ? (
+                <RivaThinkingIndicator
+                  label={
+                    loading ||
+                    (composerPhase === "transcribing"
+                      ? "Transcribe ho raha hai..."
+                      : "Riva soch rahi hai...")
+                  }
+                />
+              ) : null}
+            </>
+          )}
 
           {needsLevel ? (
             <LevelSuggestions disabled={Boolean(loading) || composerBusy} onSelectLevel={selectLevel} />
@@ -853,14 +867,39 @@ function AssistantMessageBody({
   );
 }
 
-function RivaThinkingIndicator() {
+function LoaderSpinner({ className = "" }: { className?: string }) {
+  return (
+    <svg className={`loader-spinner ${className}`.trim()} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
+      <path
+        d="M12 3a9 9 0 0 1 9 9"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+
+function StageLoader({ label }: { label: string }) {
+  return (
+    <div className="stage-loader" role="status" aria-live="polite" aria-busy="true">
+      <LoaderSpinner className="stage-loader-spinner" />
+      <p className="stage-loader-label">{label}</p>
+    </div>
+  );
+}
+
+function RivaThinkingIndicator({ label }: { label: string }) {
   return (
     <div className="message-row assistant-row" aria-live="polite" aria-busy="true">
       <div className="avatar">R</div>
       <div className="message assistant riva-thinking">
         <span className="message-meta">Riva</span>
         <div className="thinking-shimmer">
-          <span className="thinking-label">Riva soch rahi hai...</span>
+          <LoaderSpinner className="thinking-spinner" />
+          <span className="thinking-label">{label}</span>
         </div>
       </div>
     </div>
@@ -935,18 +974,7 @@ function DiscardRecordingIcon() {
 }
 
 function TranscribingIcon() {
-  return (
-    <svg className="composer-mic-icon composer-spinner" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
-      <path
-        d="M12 3a9 9 0 0 1 9 9"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="2"
-      />
-    </svg>
-  );
+  return <LoaderSpinner className="composer-mic-icon" />;
 }
 
 function Composer(props: {

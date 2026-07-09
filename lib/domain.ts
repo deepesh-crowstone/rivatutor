@@ -3,6 +3,26 @@ import { z } from "zod";
 export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
 export type CefrLevel = (typeof CEFR_LEVELS)[number];
 
+export type LessonPlanQuestionMix = {
+  minQuestions: number;
+  minSar: number;
+  maxSar: number;
+  minOpenEnded: number;
+};
+
+/** Question-mix requirements for lesson plans by CEFR level. C1–C2: no SAR. */
+export function getLessonPlanQuestionMix(level?: string | null): LessonPlanQuestionMix {
+  const normalized = (level ?? "").trim().toUpperCase();
+  if (normalized === "C1" || normalized === "C2") {
+    return { minQuestions: 4, minSar: 0, maxSar: 0, minOpenEnded: 4 };
+  }
+  if (normalized === "B1" || normalized === "B2") {
+    return { minQuestions: 4, minSar: 2, maxSar: 4, minOpenEnded: 2 };
+  }
+  // A1–A2 and unknown/missing
+  return { minQuestions: 4, minSar: 3, maxSar: 6, minOpenEnded: 2 };
+}
+
 export const LESSON_STEP_TYPES = ["concept", "question", "practice", "recap"] as const;
 export type LessonStepType = (typeof LESSON_STEP_TYPES)[number];
 
@@ -48,55 +68,89 @@ const lessonPlanStepSchema = z.object({
   expectedAnswer: z.string().optional(),
 });
 
+/** Shared step-shape checks used by default and CEFR-aware lesson plan schemas. */
+function refineLessonPlanSteps(
+  steps: z.infer<typeof lessonPlanStepSchema>[],
+  ctx: z.RefinementCtx,
+  mix: LessonPlanQuestionMix,
+) {
+  const questionSteps = steps.filter((step) => step.type === "question");
+  const sarCount = questionSteps.filter((step) => step.questionType === "sar").length;
+  const openEndedCount = questionSteps.filter((step) => step.questionType === "open_ended").length;
+
+  if (questionSteps.length < mix.minQuestions) {
+    ctx.addIssue({
+      code: "custom",
+      message: `Lesson plan must include at least ${mix.minQuestions} question steps.`,
+    });
+  }
+
+  if (sarCount < mix.minSar) {
+    ctx.addIssue({
+      code: "custom",
+      message: `Lesson plan must include at least ${mix.minSar} SAR question steps.`,
+    });
+  }
+
+  if (sarCount > mix.maxSar) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        mix.maxSar === 0
+          ? "Lesson plan for C1–C2 must not include SAR (sentence-repeat) question steps."
+          : `Lesson plan must include at most ${mix.maxSar} SAR question steps for this CEFR level.`,
+    });
+  }
+
+  if (openEndedCount < mix.minOpenEnded) {
+    ctx.addIssue({
+      code: "custom",
+      message: `Lesson plan must include at least ${mix.minOpenEnded} open_ended question steps.`,
+    });
+  }
+
+  const lastStep = steps[steps.length - 1];
+  if (!lastStep || lastStep.type !== "recap") {
+    ctx.addIssue({
+      code: "custom",
+      message: "Lesson plan must end with a recap step.",
+    });
+  }
+
+  for (const [index, step] of steps.entries()) {
+    if (step.type === "question" && step.questionType === "sar" && !step.expectedAnswer?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message: `SAR question step at index ${index} requires expectedAnswer.`,
+      });
+    }
+  }
+}
+
+/** Default schema (A1–A2 mix) — used when level is unknown. Prefer `lessonPlanSchemaForLevel`. */
 export const lessonPlanSchema = z.object({
   steps: z
     .array(lessonPlanStepSchema)
     .min(8)
     .max(12)
     .superRefine((steps, ctx) => {
-      const questionSteps = steps.filter((step) => step.type === "question");
-      const sarCount = questionSteps.filter((step) => step.questionType === "sar").length;
-      const openEndedCount = questionSteps.filter((step) => step.questionType === "open_ended").length;
-
-      if (questionSteps.length < 4) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Lesson plan must include at least 4 question steps.",
-        });
-      }
-
-      if (sarCount < 3) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Lesson plan must include at least 3 SAR question steps.",
-        });
-      }
-
-      if (openEndedCount < 2) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Lesson plan must include at least 2 open_ended question steps.",
-        });
-      }
-
-      const lastStep = steps[steps.length - 1];
-      if (!lastStep || lastStep.type !== "recap") {
-        ctx.addIssue({
-          code: "custom",
-          message: "Lesson plan must end with a recap step.",
-        });
-      }
-
-      for (const [index, step] of steps.entries()) {
-        if (step.type === "question" && step.questionType === "sar" && !step.expectedAnswer?.trim()) {
-          ctx.addIssue({
-            code: "custom",
-            message: `SAR question step at index ${index} requires expectedAnswer.`,
-          });
-        }
-      }
+      refineLessonPlanSteps(steps, ctx, getLessonPlanQuestionMix("A2"));
     }),
 });
+
+/** CEFR-aware lesson plan schema — C1/C2 forbid SAR and require open_ended-heavy plans. */
+export function lessonPlanSchemaForLevel(level?: string | null) {
+  const mix = getLessonPlanQuestionMix(level);
+  return z.object({
+    steps: z
+      .array(lessonPlanStepSchema)
+      .min(8)
+      .max(12)
+      .superRefine((steps, ctx) => {
+        refineLessonPlanSteps(steps, ctx, mix);
+      }),
+  });
+}
 
 export type LessonPlanResult = z.infer<typeof lessonPlanSchema>;
 

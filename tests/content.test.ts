@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatLanguageRulesForPrompt,
   getHinglishCompositionRule,
+  getLessonPlanStructurePrompt,
   isContinueAdvancePhrase,
   resolveHinglishCompositionBand,
   RIVA_GRAMMAR_RULE,
@@ -42,6 +43,13 @@ describe("CEFR Hinglish composition", () => {
     const block = formatLanguageRulesForPrompt("B2");
     expect(block).toContain(RIVA_LANGUAGE_RULE);
     expect(block).toContain("balanced");
+  });
+
+  it("describes open_ended-only structure for C1–C2 lesson plans", () => {
+    const c1 = getLessonPlanStructurePrompt("C1");
+    expect(c1).toContain("0 SAR");
+    expect(c1).toContain("open_ended only");
+    expect(getLessonPlanStructurePrompt("A2")).toContain("3 SAR");
   });
 });
 

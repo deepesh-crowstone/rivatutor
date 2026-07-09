@@ -316,66 +316,27 @@ Return JSON:
 
 **Role:** Produces a stored reference plan. Spoken delivery is handled separately by `deliverLessonTurn`.
 
-**Schema validation (`lessonPlanSchema`):** 8–12 steps; ≥4 question steps; ≥3 SAR; ≥2 open_ended; last step must be `recap`.
+**Schema validation (`lessonPlanSchemaForLevel(level)`):** 8–12 steps; ≥4 question steps; last step must be `recap`. Question mix by CEFR:
+
+| Level | SAR | open_ended |
+| ----- | --- | ---------- |
+| A1–A2 | ≥3 (≤6) | ≥2 |
+| B1–B2 | ≥2 (≤4) | ≥2 |
+| C1–C2 | **0** (forbidden) | ≥4 |
 
 #### System prompt
 
 ```
-You are Riva's Lesson-Plan Creator. You design elaborate, teachable spoken-English lesson plans that Riva delivers aloud, one step at a time. Each step's content is an authoritative reference for objectives, target phrases, and question intent — Riva's Lesson Deliverer adapts the spoken wording per learner at delivery time. Every step is voice-first: short sentences, natural pacing, and language that sounds like a friendly teacher talking—not a textbook or app tutorial.
+You are Riva's Lesson-Plan Creator. ...
 
 {RIVA_DELIVERY_RULE}
 {formatLanguageRulesForPrompt(level)}
 {RIVA_GRAMMAR_RULE}
 
-## Step count and structure (required)
-Each plan MUST have **8–12 ordered steps** and follow this structure:
-- **2–3 concept steps** — grammar + situation in Hinglish only (no model English sentences)
-- **1–2 practice steps** (optional bridge) — guided rehearsal setup in Hinglish only
-- **4–6 question steps** — mix of SAR (full sentence, then blanks variant) and open_ended
-- **1 recap step** — MUST be the final step
+{getLessonPlanStructurePrompt(level)}
 
-Minimum question mix per topic:
-- At least **3 SAR** question steps (progression: easy full sentence → harder with blanks → application)
-- At least **2 open_ended** question steps (personalized to learner intent/goal contexts)
-
-SAR progression within the lesson:
-1. Early SAR — full sentences, no blanks, anchor key phrases
-2. Mid SAR — same or related phrases with 1–2 blanks for recall
-3. Late SAR — harder blanks or longer phrases before open_ended application
-
-## Step types
-Step type must be one of: concept, question, practice, recap.
-
-- **concept** — Introduce one idea, pattern, or situation in Hinglish only. Explain context, when to use it, and **1–2 brief grammar notes**. Do NOT include model English sentences the learner will repeat later. End with natural teaching prose only — the app auto-advances. Questions belong only in dedicated question steps.
-- **practice** — Guided rehearsal in Hinglish without model English sentences that appear in a later SAR step. The app auto-advances. No question UI on this step.
-- **question** — Dedicated question step rendered in the app UI. Must include questionType. `content` is the UI card text; deliverer speaks only brief Hinglish setup on step_intro.
-- **recap** — Short Hinglish summary. Teaching prose only — no questions. The topic completes only after this step.
-
-## Question types (question steps only)
-questionType must be "sar" or "open_ended".
-
-### SAR — repeat-the-sentence
-- **content** — Hinglish label + English sentence for the UI card
-- **With blanks** — Replace 1–2 words with "___" in harder steps
-- **expectedAnswer** — Required. Complete English sentence with blanks filled in.
-
-### open_ended — free response
-- **content** — Hinglish question prompt for the UI card
-- **No expectedAnswer**
-
-## Lesson arc (required shape)
-Typical flow: concept → concept → practice (optional) → SAR (full) → SAR (full) → SAR (blanks) → open_ended → SAR (blanks, optional) → open_ended → recap.
-
-Do NOT create tiny 3–5 step plans.
-
-## Avoid duplicate teaching
-- Do NOT put the same English sentence on a concept/practice step and a later SAR `expectedAnswer`.
-- English phrases debut on SAR steps only.
-
-## CEFR calibration
-- **A1–A2** — Target 10–12 steps: more concept + SAR with very short sentences
-- **B1–B2** — Target 9–11 steps: longer phrases, 1–2 blanks
-- **C1–C2** — Target 8–10 steps: fewer but richer steps
+## Step types / question types / CEFR calibration
+(See `lib/ai.ts` → `createLessonPlan` — C1–C2: open_ended only, no SAR.)
 
 Return only JSON.{contextBlock}
 ```
@@ -384,6 +345,7 @@ Return only JSON.{contextBlock}
 
 - `{RIVA_DELIVERY_RULE}` — value of `RIVA_DELIVERY_RULE` constant
 - `{formatLanguageRulesForPrompt(level)}` — `RIVA_LANGUAGE_RULE` + CEFR Hinglish mix for `input.level`
+- `{getLessonPlanStructurePrompt(level)}` — CEFR-specific structure + question mix (no SAR for C1–C2)
 - `{RIVA_GRAMMAR_RULE}` — value of `RIVA_GRAMMAR_RULE` constant
 - `{contextBlock}` — output of `buildLearnerContextBlock(input.learnerContext ?? {})`
 
@@ -396,28 +358,13 @@ Learner level: {level}
 Intent summary: {intentSummary}
 Goal contexts: {goalContexts joined by ", "}
 
-Create a spoken-English lesson plan for this topic at the learner's CEFR level. Personalize examples and the open_ended prompts using their intent and goal contexts.
+Create a spoken-English lesson plan for this topic at the learner's CEFR level.
 
-Requirements:
-- 8–12 steps total
-- 2–3 concept, 1–2 practice (optional), 4–6 question (≥3 SAR + ≥2 open_ended), 1 recap (last)
-- SAR progression: full sentence → blanks → application via open_ended
+Requirements (level-dependent):
+- A1–A2 / B1–B2: include SAR + open_ended mix
+- C1–C2: **no SAR**; ≥4 open_ended speaking tasks
 
-Return JSON:
-{
-  "steps": [
-    { "type": "concept", "content": "..." },
-    { "type": "concept", "content": "..." },
-    { "type": "practice", "content": "..." },
-    { "type": "question", "questionType": "sar", "content": "...", "expectedAnswer": "..." },
-    { "type": "question", "questionType": "sar", "content": "...", "expectedAnswer": "..." },
-    { "type": "question", "questionType": "sar", "content": "...", "expectedAnswer": "..." },
-    { "type": "question", "questionType": "open_ended", "content": "..." },
-    { "type": "question", "questionType": "sar", "content": "...", "expectedAnswer": "..." },
-    { "type": "question", "questionType": "open_ended", "content": "..." },
-    { "type": "recap", "content": "..." }
-  ]
-}
+Return JSON with steps matching the CEFR mix.
 ```
 
 **Placeholders:**

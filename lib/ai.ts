@@ -1,8 +1,9 @@
 import {
   curriculumSchema,
+  getLessonPlanQuestionMix,
   intentClaritySchema,
   lessonDeliverySchema,
-  lessonPlanSchema,
+  lessonPlanSchemaForLevel,
   topicChangeIntentSchema,
   type CurriculumResult,
   type IntentClarityResult,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/domain";
 import {
   formatLanguageRulesForPrompt,
+  getLessonPlanStructurePrompt,
   RIVA_DELIVERY_RULE,
   RIVA_GRAMMAR_RULE,
 } from "@/lib/content";
@@ -118,6 +120,45 @@ export async function createLessonPlan(input: {
 }): Promise<LessonPlanResult> {
   const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {});
   const languageRules = formatLanguageRulesForPrompt(input.level);
+  const structurePrompt = getLessonPlanStructurePrompt(input.level);
+  const mix = getLessonPlanQuestionMix(input.level);
+  const noSar = mix.maxSar === 0;
+  const requirementsBlock = noSar
+    ? `- 8–12 steps total
+- 2–3 concept, 0–1 practice (optional), 4–6 question steps that are **all open_ended** (≥${mix.minOpenEnded} open_ended), 1 recap (last)
+- **Do NOT include any SAR / sentence-repeat questions** — they are too easy for C1–C2
+- Open-ended prompts should invite extended speech: opinion, negotiation, problem-solving, persuasion`
+    : `- 8–12 steps total
+- 2–3 concept, 1–2 practice (optional), 4–6 question (≥${mix.minSar} SAR + ≥${mix.minOpenEnded} open_ended), 1 recap (last)
+- SAR progression: full sentence → blanks → application via open_ended`;
+  const exampleJson = noSar
+    ? `{
+  "steps": [
+    { "type": "concept", "content": "At airport check-in, tone and clarity matter more than fixed phrases — keep requests polite but direct." },
+    { "type": "concept", "content": "When something goes wrong (delay, missing seat), frame the issue, propose a solution, and stay calm." },
+    { "type": "practice", "content": "Next you'll handle realistic check-in scenarios in your own words — no scripted repeats." },
+    { "type": "question", "questionType": "open_ended", "content": "Brief setup.", "questionPrompt": "You're at check-in and your preferred seat is gone. Explain the problem and negotiate an alternative." },
+    { "type": "question", "questionType": "open_ended", "content": "Brief setup.", "questionPrompt": "The agent seems rushed. How would you politely insist they recheck your booking details?" },
+    { "type": "question", "questionType": "open_ended", "content": "Brief setup.", "questionPrompt": "Your flight is delayed and you have a tight connection. Persuade the agent to help you rebook." },
+    { "type": "question", "questionType": "open_ended", "content": "Brief setup.", "questionPrompt": "Role-play: respond as if the agent offered a later flight you don't want — push back with a clear preference." },
+    { "type": "recap", "content": "Today you practiced handling check-in problems with clear, confident spoken English — framing issues, negotiating, and staying polite under pressure." }
+  ]
+}`
+    : `{
+  "steps": [
+    { "type": "concept", "content": "Airport check-in par hum politely apna passport dete hain. English mein 'here is' ka matlab hota hai 'yeh hai' — pehle cheez (subject), phir 'is' (verb). Yeh pattern formal situations mein common hai." },
+    { "type": "concept", "content": "Immigration officer se baat karte waqt tone calm aur respectful rakhte hain. 'Good morning' se start karna professional lagta hai — yeh greeting formal settings mein safe choice hai." },
+    { "type": "practice", "content": "Ab hum check-in counter par politely baat karne ki practice karenge — pehle greeting, phir document dikhana. Agle steps mein aap exact English phrases repeat karenge." },
+    { "type": "question", "questionType": "sar", "content": "Ye sentence repeat kijiye: Good morning, here is my passport.", "expectedAnswer": "Good morning, here is my passport." },
+    { "type": "question", "questionType": "sar", "content": "Ye sentence repeat kijiye: I am here for my flight to Mumbai.", "expectedAnswer": "I am here for my flight to Mumbai." },
+    { "type": "question", "questionType": "sar", "content": "Ab yeh try kijiye: Could you please ___ my boarding pass?", "expectedAnswer": "Could you please stamp my boarding pass?" },
+    { "type": "question", "questionType": "open_ended", "content": "Brief setup hint only.", "questionPrompt": "Socho tum airport check-in par ho — apne words mein officer ko politely batao tum kahan ja rahe ho." },
+    { "type": "question", "questionType": "sar", "content": "Ab yeh try kijiye: Where is ___ number five?", "expectedAnswer": "Where is gate number five?" },
+    { "type": "question", "questionType": "open_ended", "content": "Real scenario practice.", "questionPrompt": "Apne goal context ke hisaab se — real life mein tum check-in par kya problem face kar sakte ho? English mein batao." },
+    { "type": "recap", "content": "Aaj humne airport check-in ki key phrases practice ki — greeting, passport dena, aur gate poochhna. Yeh real travel mein kaam aayengi." }
+  ]
+}`;
+
   return callOpenRouterJson(
     [
       {
@@ -129,67 +170,46 @@ ${RIVA_DELIVERY_RULE}
 ${languageRules}
 ${RIVA_GRAMMAR_RULE}
 
-## Step count and structure (required)
-Each plan MUST have **8–12 ordered steps** and follow this structure:
-- **2–3 concept steps** — grammar + situation in Hinglish only (no model English sentences)
-- **1–2 practice steps** (optional bridge) — guided rehearsal setup in Hinglish only
-- **4–6 question steps** — mix of SAR (full sentence, then blanks variant) and open_ended
-- **1 recap step** — MUST be the final step
-
-Minimum question mix per topic:
-- At least **3 SAR** question steps (progression: easy full sentence → harder with blanks → application)
-- At least **2 open_ended** question steps (personalized to learner intent/goal contexts)
-
-SAR progression within the lesson:
-1. Early SAR — full sentences, no blanks, anchor key phrases
-2. Mid SAR — same or related phrases with 1–2 blanks for recall
-3. Late SAR — harder blanks or longer phrases before open_ended application
+${structurePrompt}
 
 ## Step types
 Step type must be one of: concept, question, practice, recap.
 
-- **concept** — Introduce one idea, pattern, or situation in Hinglish only. Explain context, when to use it, and **1–2 brief grammar notes** (why the English pattern works — tense, word order, polite forms, articles, prepositions, question structure). Connect grammar to the topic's real situations (airport check-in, gate directions, office greetings, etc.). Do NOT include model English sentences the learner will repeat later (those belong on SAR question steps). End with natural teaching prose only — the app auto-advances to the next step. Do NOT embed questions in spoken text — questions belong only in dedicated question steps.
-- **practice** — Guided rehearsal in Hinglish: describe the situation, what the learner will do next, and optionally one grammar reminder tied to the upcoming phrase — without model English sentences that appear in a later SAR step. End with natural teaching prose only — the app auto-advances. No question UI on this step.
-- **question** — A dedicated question step rendered in the app UI (not spoken aloud as a question). Must include questionType (see below). The step's \`content\` is the authoritative prompt/sentence for the UI card; the Lesson Deliverer speaks only brief Hinglish setup on step_intro, not the full question text.
-- **recap** — Short Hinglish summary of what was practiced and why it matters for the learner's goals. Teaching prose only — no questions. The topic completes only after this step.
+- **concept** — Introduce one idea, pattern, or situation. Explain context, when to use it, and **1–2 brief grammar/strategy notes**. Do NOT include model English sentences the learner will repeat later${noSar ? " (this level has no SAR steps)" : " (those belong on SAR question steps)"}. End with natural teaching prose only — the app auto-advances. Questions belong only in dedicated question steps.
+- **practice** — Guided rehearsal: describe the situation and what the learner will do next${noSar ? " in their own words" : ", without model English sentences that appear in a later SAR step"}. End with natural teaching prose only — the app auto-advances. No question UI on this step.
+- **question** — A dedicated question step rendered in the app UI (not spoken aloud as a question). Must include questionType (see below). The step's \`content\` is the authoritative prompt/sentence for the UI card; the Lesson Deliverer speaks only brief setup on step_intro, not the full question text.
+- **recap** — Short summary of what was practiced and why it matters for the learner's goals. Teaching prose only — no questions. The topic completes only after this step.
 
 ## Question types (question steps only)
-questionType must be "sar" or "open_ended".
+questionType must be "sar" or "open_ended"${noSar ? '. For this learner level, use **only** "open_ended".' : "."}
 
 ### SAR — repeat-the-sentence
-The learner repeats a model sentence aloud. Use SAR to build pronunciation, rhythm, and fixed phrases.
+${noSar ? "Do **not** use SAR for this CEFR level." : `The learner repeats a model sentence aloud. Use SAR to build pronunciation, rhythm, and fixed phrases.
 
 - **content** — Reference text for the UI question card. Use Hinglish label + English sentence (e.g. "Ye sentence repeat kijiye: I would like to order a coffee."). This is shown in the QUESTION card, not read verbatim by the deliverer on step_intro.
 - **With blanks** — For harder steps, replace one or two words with "___" in the English sentence portion. The UI card shows the sentence; blanks signal words the learner must supply.
-- **expectedAnswer** — Required for SAR. The complete correct English sentence with all blanks filled in. The app compares speech to this string and renders word-by-word feedback in the card. Always English only.
+- **expectedAnswer** — Required for SAR. The complete correct English sentence with all blanks filled in. The app compares speech to this string and renders word-by-word feedback in the card. Always English only.`}
 
 ### open_ended — free response
 One clear prompt shown in the UI question card; the learner answers in their own words.
 
-- **questionPrompt** — Preferred field for open_ended. The full question for the UI card in Hinglish (e.g. "Socho tum check-in counter par khade ho — officer ko politely greet karo aur batao tumhari flight kahan ke liye hai."). Must be self-contained — scenario + question live here only.
+- **questionPrompt** — Preferred field for open_ended. The full question for the UI card (e.g. a self-contained scenario + question). Must be self-contained — scenario + question live here only.
 - **content** — If \`questionPrompt\` is set, use a very brief deliverer hint only (max 1 short sentence, no scenario details, no questions) OR repeat \`questionPrompt\`. If \`questionPrompt\` is omitted, \`content\` holds the UI question prompt.
 - **No expectedAnswer** — Omit expectedAnswer entirely.
 - Do NOT put scenario setup and the question in both fields — the deliverer speaks at most one short generic setup sentence; all scenario+question detail stays in \`questionPrompt\` (or \`content\` when \`questionPrompt\` is omitted).
 
-## Lesson arc (required shape)
-Typical flow: concept → concept → practice (optional) → SAR (full) → SAR (full) → SAR (blanks) → open_ended → SAR (blanks, optional) → open_ended → recap.
-
 Do NOT create tiny 3–5 step plans. Lessons should feel substantial — enough teaching and practice for the learner to build confidence before the topic completes.
 
 ## Avoid duplicate teaching
-- Do NOT put the same English sentence on a concept/practice step and a later SAR \`expectedAnswer\`.
+${noSar ? "- Do not preview scripted sentences for the learner to repeat — this level uses open-ended speaking only." : `- Do NOT put the same English sentence on a concept/practice step and a later SAR \`expectedAnswer\`.
 - When a step's main job is "learner repeats this exact sentence", use a SAR question step with a short Hinglish intro in \`content\` — not a separate concept that previews the sentence.
-- Concept/practice \`content\` is Hinglish situation-setting plus grammar notes only; English phrases debut on SAR steps (\`content\` + \`expectedAnswer\`).
-
-## Grammar in concept steps (examples of tone — do not copy verbatim)
-- "Check-in par hum polite rehte hain. English mein 'here is' ka matlab hota hai 'yeh hai' — pehle subject, phir verb. Agli step mein aap yeh pattern use karenge."
-- "Excuse me ke baad hum question poochhte hain. 'Where is gate 5?' mein 'is' isliye kyunki gate ek jagah hai — location ke liye 'is' use hota hai."
+- Concept/practice \`content\` is situation-setting plus grammar notes only; English phrases debut on SAR steps (\`content\` + \`expectedAnswer\`).`}
 
 ## CEFR calibration
-Match vocabulary, sentence length, and blank count to the learner's level:
-- **A1–A2** — Target 10–12 steps: more concept + SAR steps with very short sentences, high-frequency words, 0–1 blanks max, concrete situations.
-- **B1–B2** — Target 9–11 steps: longer phrases, some idioms, 1–2 blanks, situational variety.
-- **C1–C2** — Target 8–10 steps: fewer but richer steps — natural nuanced sentences, subtle blanks, open_ended prompts that invite detail and opinion.
+Match vocabulary, sentence length, and task difficulty to the learner's level:
+- **A1–A2** — Target 10–12 steps: more concept + SAR with very short sentences, high-frequency words, 0–1 blanks max, concrete situations.
+- **B1–B2** — Target 9–11 steps: longer phrases, some idioms, 1–2 blanks, situational variety; keep some SAR but emphasize open_ended application.
+- **C1–C2** — Target 8–10 steps: **no SAR**; richer open_ended prompts that invite detail, opinion, negotiation, and nuance.
 
 Personalize examples using the learner's intent summary and goal contexts when provided.
 
@@ -206,28 +226,13 @@ Goal contexts: ${input.goalContexts.join(", ")}
 Create a spoken-English lesson plan for this topic at the learner's CEFR level. Personalize examples and the open_ended prompts using their intent and goal contexts.
 
 Requirements:
-- 8–12 steps total
-- 2–3 concept, 1–2 practice (optional), 4–6 question (≥3 SAR + ≥2 open_ended), 1 recap (last)
-- SAR progression: full sentence → blanks → application via open_ended
+${requirementsBlock}
 
 Return JSON:
-{
-  "steps": [
-    { "type": "concept", "content": "Airport check-in par hum politely apna passport dete hain. English mein 'here is' ka matlab hota hai 'yeh hai' — pehle cheez (subject), phir 'is' (verb). Yeh pattern formal situations mein common hai." },
-    { "type": "concept", "content": "Immigration officer se baat karte waqt tone calm aur respectful rakhte hain. 'Good morning' se start karna professional lagta hai — yeh greeting formal settings mein safe choice hai." },
-    { "type": "practice", "content": "Ab hum check-in counter par politely baat karne ki practice karenge — pehle greeting, phir document dikhana. Agle steps mein aap exact English phrases repeat karenge." },
-    { "type": "question", "questionType": "sar", "content": "Ye sentence repeat kijiye: Good morning, here is my passport.", "expectedAnswer": "Good morning, here is my passport." },
-    { "type": "question", "questionType": "sar", "content": "Ye sentence repeat kijiye: I am here for my flight to Mumbai.", "expectedAnswer": "I am here for my flight to Mumbai." },
-    { "type": "question", "questionType": "sar", "content": "Ab yeh try kijiye: Could you please ___ my boarding pass?", "expectedAnswer": "Could you please stamp my boarding pass?" },
-    { "type": "question", "questionType": "open_ended", "content": "Brief setup hint only.", "questionPrompt": "Socho tum airport check-in par ho — apne words mein officer ko politely batao tum kahan ja rahe ho." },
-    { "type": "question", "questionType": "sar", "content": "Ab yeh try kijiye: Where is ___ number five?", "expectedAnswer": "Where is gate number five?" },
-    { "type": "question", "questionType": "open_ended", "content": "Real scenario practice.", "questionPrompt": "Apne goal context ke hisaab se — real life mein tum check-in par kya problem face kar sakte ho? English mein batao." },
-    { "type": "recap", "content": "Aaj humne airport check-in ki key phrases practice ki — greeting, passport dena, aur gate poochhna. Yeh real travel mein kaam aayengi." }
-  ]
-}`,
+${exampleJson}`,
       },
     ],
-    lessonPlanSchema,
+    lessonPlanSchemaForLevel(input.level),
   );
 }
 

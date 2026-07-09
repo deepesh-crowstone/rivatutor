@@ -582,7 +582,11 @@ select:focus {
   box-shadow: 0 0 0 4px rgba(111, 77, 246, 0.18);
 }
 
-.composer-spinner {
+.loader-spinner {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  color: var(--accent-dark);
   animation: composer-spin 0.9s linear infinite;
 }
 
@@ -596,14 +600,41 @@ select:focus {
   font-weight: 700;
 }
 
+.stage-loader {
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  min-height: min(320px, 50vh);
+  margin: auto;
+  color: var(--muted);
+  text-align: center;
+}
+
+.stage-loader-spinner {
+  width: 36px;
+  height: 36px;
+}
+
+.stage-loader-label {
+  margin: 0;
+  max-width: 28ch;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--foreground);
+}
+
 .riva-thinking {
-  min-width: 160px;
+  min-width: 180px;
   border-color: #c8bbff;
   background: linear-gradient(135deg, #fff, #f4f0ff);
 }
 
 .thinking-shimmer {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   overflow: hidden;
   border-radius: 12px;
   color: var(--muted);
@@ -615,10 +646,24 @@ select:focus {
   inset: 0;
   background: linear-gradient(90deg, transparent, rgba(111, 77, 246, 0.14), transparent);
   animation: shimmer 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.thinking-spinner {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+}
+
+.thinking-label {
+  position: relative;
+  z-index: 1;
+  font-weight: 700;
 }
 
 .thinking-label::after {
-  content: "...";
+  content: "";
   display: inline-block;
   width: 1.2em;
   text-align: left;
