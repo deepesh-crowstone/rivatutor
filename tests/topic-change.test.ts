@@ -54,6 +54,18 @@ describe("detectTopicChangeIntent", () => {
       confidence: "strong",
     });
 
+    expect(
+      detectTopicChangeIntent(
+        "i wanna practice travel conversations",
+        "Commanding Presence: Professional Intonation",
+      ),
+    ).toMatchObject({
+      wantsChange: true,
+      topicClear: true,
+      newTopicTitle: "travel conversations",
+      confidence: "strong",
+    });
+
     expect(detectTopicChangeIntent("I practice speaking every day", "Airport").wantsChange).toBe(false);
   });
 

@@ -34,12 +34,16 @@ const STRONG_CHANGE_PATTERNS: RegExp[] = [
 const LETS_PRACTICE_PATTERN =
   /\b(?:let'?s|lets|shall\s+we|can\s+we|we\s+should)\s+(?:do|learn|practice|study|try|cover|work\s+on)\s+(.+)$/i;
 
+/** "I wanna / I want to practice X" — strong when X differs from the active topic. */
+const WANT_TO_PRACTICE_PATTERN =
+  /\b(?:i\s+)?(?:wanna|want\s+to|want\s+a|would\s+like\s+to|id\s+like\s+to|i'?d\s+like\s+to)\s+(?:do|learn|practice|study|try|cover|work\s+on)\s+(.+)$/i;
+
 const TITLE_EXTRACTION_PATTERNS: RegExp[] = [
   /\b(?:new\s+topic|topic)\s*[:\-]\s*(.+)$/i,
   /\b(?:change|switch)\s+(?:the\s+)?topic\s+to\s+(.+)$/i,
   /\b(?:i\s+want\s+to\s+learn|want\s+to\s+learn|learn)\s+about\s+(.+?)(?:\s+instead)?$/i,
   LETS_PRACTICE_PATTERN,
-  /\b(?:i\s+want\s+to|want\s+to)\s+(?:do|learn|practice|study)\s+(.+?)(?:\s+instead)?$/i,
+  WANT_TO_PRACTICE_PATTERN,
   /\b(?:practice|study)\s+(.+)$/i,
   /\b(?:ab|chalo|chaliye)\s+(.+?)\s+(?:seekhte|karte|practice)\b/i,
   /\binstead\s+(?:of\s+this[,.]?\s*)?(?:let'?s\s+)?(?:do|learn|practice)?\s*(.+)$/i,
@@ -147,6 +151,7 @@ export function detectTopicChangeIntent(
   const extracted = extractTitle(trimmed);
   const softLearnHit = SOFT_LEARN_ABOUT_PATTERN.test(trimmed);
   const letsPracticeHit = LETS_PRACTICE_PATTERN.test(trimmed);
+  const wantToPracticeHit = WANT_TO_PRACTICE_PATTERN.test(trimmed);
   const differentFromCurrent =
     Boolean(extracted) &&
     (!currentTopicTitle || !topicsLikelySame(extracted!, currentTopicTitle));
@@ -161,9 +166,9 @@ export function detectTopicChangeIntent(
     };
   }
 
-  // "Let's practice Casual Travel Conversations" while another topic is active —
+  // "Let's practice X" / "I wanna practice X" while another topic is active —
   // treat as a strong switch so the LLM classifier cannot keep the old lesson.
-  if (letsPracticeHit && differentFromCurrent) {
+  if ((letsPracticeHit || wantToPracticeHit) && differentFromCurrent) {
     return {
       wantsChange: true,
       topicClear: true,
@@ -172,15 +177,13 @@ export function detectTopicChangeIntent(
     };
   }
 
-  if (extracted && differentFromCurrent) {
-    if (softLearnHit || /\b(?:want\s+to|i\s+want)\s+(?:do|learn|practice|study)\b/i.test(trimmed)) {
-      return {
-        wantsChange: true,
-        topicClear: true,
-        newTopicTitle: extracted,
-        confidence: "soft",
-      };
-    }
+  if (extracted && differentFromCurrent && softLearnHit) {
+    return {
+      wantsChange: true,
+      topicClear: true,
+      newTopicTitle: extracted,
+      confidence: "soft",
+    };
   }
 
   if (softLearnHit && differentFromCurrent) {
