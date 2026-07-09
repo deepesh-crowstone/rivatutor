@@ -103,7 +103,7 @@ export async function submitOnboardingAnswer(answer: string) {
         learnerId: learner.id,
         role: "assistant",
         kind: "profile_level_question",
-        content: `Bahut khushi hui ${nameResult.name} ji se milkar. Main aapki English improve karne mein help karungi. Usse pehle mujhe aapka current English level batayein, taaki uske hisaab se main aapse baat kar saku.`,
+        content: `Nice to meet you ${nameResult.name}. Main aapki English improve karne mein help karungi. Usse pehle mujhe aapka current English level batayein, taaki uske hisaab se main aapse baat kar saku.`,
       },
     });
 

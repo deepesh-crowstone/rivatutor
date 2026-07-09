@@ -842,7 +842,7 @@ These strings are stored or displayed as Riva assistant messages without an LLM 
 | -------------------- | -------------------------------------------------------------------------------------------------- | ------------------------ |
 | New learner, no name | `Namaste! Main Riva hoon, aapki spoken English partner. Aapka naam kya hai?` | `profile_name_question`  |
 | Name not captured    | `{followUpQuestion}` or fallback `Aapka naam samajh nahi aaya. Main aapko kya bulaoon?` | `profile_name_question`  |
-| Name captured        | `Bahut khushi hui {name} ji se milkar. Main aapki English improve karne mein help karungi. Usse pehle mujhe aapka current English level batayein, taaki uske hisaab se main aapse baat kar saku.` | `profile_level_question` |
+| Name captured        | `Nice to meet you {name}. Main aapki English improve karne mein help karungi. Usse pehle mujhe aapka current English level batayein, taaki uske hisaab se main aapse baat kar saku.` | `profile_level_question` |
 | Level captured       | `Bahut badhiya! Main aapko simple steps mein English bolna sikhaungi. Pehle mujhe yeh batayein — aap English kyun seekhna chahte hain?` | `intent_question`        |
 
 
