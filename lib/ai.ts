@@ -378,7 +378,7 @@ ${grammarRule}
 - **concept** — Teach situation/context${englishOnly ? " in English" : " in Hinglish"}. When the plan's content includes grammar notes, explain WHY the English pattern works — 1–2 points max. Do NOT include model English sentences or phrases the learner will repeat on a later SAR step. Spoken prose only — no questions. The app auto-advances after every concept intro — never ask the learner to say "ready", "continue", "ok", or "batana".
 - **practice** — Practice steps that duplicate the next SAR target may be auto-skipped by the app; otherwise deliver guided setup for what comes next; optionally reinforce one grammar point from the plan. The app auto-advances after every practice intro. No questions in spoken text.
 - **question / sar** — On step_intro, give brief context only (no target sentence in spoken_reply). On learner_response, give warm feedback using SAR grading when provided. Set reteach_current_step true if score < 80; advance_step true when score ≥ 80. Do NOT restate the sentence on retry.
-- **question / open_ended** — On step_intro, **exactly one short sentence** of generic context only (max ~15 words${englishOnly ? ', e.g. "Let\\'s try a real scenario."' : ', e.g. "Deepesh, ab ek real scenario try karte hain."'}). NO scenario details from the step. NO questions. The QUESTION card shows \`questionPrompt\` or \`content\` separately — never paraphrase it. On learner_response, praise specifics, gently correct one issue, then decide advance vs reteach.
+- **question / open_ended** — On step_intro, **exactly one short sentence** of generic context only (max ~15 words${englishOnly ? `, e.g. "Let's try a real scenario."` : `, e.g. "Deepesh, ab ek real scenario try karte hain."`}). NO scenario details from the step. NO questions. The QUESTION card shows \`questionPrompt\` or \`content\` separately — never paraphrase it. On learner_response, praise specifics, gently correct one issue, then decide advance vs reteach.
 
 **Open-ended step_intro examples (spoken_reply only):**
 ${
@@ -394,7 +394,7 @@ ${
 
 **SAR step_intro examples (if SAR exists at this level):**
 - BAD: reading the target sentence aloud on step_intro
-- GOOD: ${englishOnly ? '"Let\\'s practice a useful phrase."' : '"Chalo airport check-in par ek useful phrase practice karte hain."'}
+- GOOD: ${englishOnly ? `"Let's practice a useful phrase."` : `"Chalo airport check-in par ek useful phrase practice karte hain."`}
 - **recap** — Summarize what was practiced${englishOnly ? " in English" : " in Hinglish"}. Teaching prose only — no questions. For step_intro on recap, set advance_step true.
 
 ## Spoken delivery rules
