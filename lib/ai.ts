@@ -14,7 +14,11 @@ import {
   type SarGradingContext,
   type TopicChangeIntentResult,
 } from "@/lib/domain";
-import { RIVA_DELIVERY_RULE, RIVA_GRAMMAR_RULE, RIVA_LANGUAGE_RULE } from "@/lib/content";
+import {
+  formatLanguageRulesForPrompt,
+  RIVA_DELIVERY_RULE,
+  RIVA_GRAMMAR_RULE,
+} from "@/lib/content";
 import { formatLessonPlanForPrompt } from "@/lib/lesson-delivery";
 import { callOpenRouterJson } from "@/lib/openrouter";
 import { buildLearnerContextBlock } from "@/lib/user-extraction";
@@ -26,12 +30,13 @@ export async function judgeIntentClarity(input: {
   learnerContext?: LearnerContextInput;
 }): Promise<IntentClarityResult> {
   const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {});
+  const languageRules = formatLanguageRulesForPrompt(input.learnerContext?.selfDeclaredLevel);
   return callOpenRouterJson(
     [
       {
         role: "system",
         content:
-          `You are Riva's Intent Clarity Judge. Decide if the learner's reason for learning spoken English is specific enough to personalize a curriculum. Clear means you can name real situations such as interviews, work meetings, travel, client calls, presentations, daily conversation, or exams. ${RIVA_DELIVERY_RULE} ${RIVA_LANGUAGE_RULE} Follow-up questions must be spoken questions only, in Hinglish. Return only JSON.${contextBlock}`,
+          `You are Riva's Intent Clarity Judge. Decide if the learner's reason for learning spoken English is specific enough to personalize a curriculum. Clear means you can name real situations such as interviews, work meetings, travel, client calls, presentations, daily conversation, or exams. ${RIVA_DELIVERY_RULE} ${languageRules} Follow-up questions must be spoken questions only, matching the CEFR Hinglish mix. Return only JSON.${contextBlock}`,
       },
       {
         role: "user",
@@ -74,12 +79,13 @@ export async function planCurriculum(input: {
   learnerContext?: LearnerContextInput;
 }): Promise<CurriculumResult> {
   const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {});
+  const languageRules = formatLanguageRulesForPrompt(input.level);
   return callOpenRouterJson(
     [
       {
         role: "system",
         content:
-          `You are Riva's Curriculum Planner. Create an ordered spoken-English curriculum that moves from foundational comfort to the learner's target situations. ${RIVA_DELIVERY_RULE} ${RIVA_LANGUAGE_RULE} Topic titles and descriptions should be in Hinglish or bilingual (Hinglish label + English phrase where helpful). Return only JSON.${contextBlock}`,
+          `You are Riva's Curriculum Planner. Create an ordered spoken-English curriculum that moves from foundational comfort to the learner's target situations. ${RIVA_DELIVERY_RULE} ${languageRules} Topic titles and descriptions should match the CEFR Hinglish mix (Hinglish/bilingual for A1–B2; clearer English titles OK for C1–C2). Return only JSON.${contextBlock}`,
       },
       {
         role: "user",
@@ -111,6 +117,7 @@ export async function createLessonPlan(input: {
   learnerContext?: LearnerContextInput;
 }): Promise<LessonPlanResult> {
   const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {});
+  const languageRules = formatLanguageRulesForPrompt(input.level);
   return callOpenRouterJson(
     [
       {
@@ -119,7 +126,7 @@ export async function createLessonPlan(input: {
           `You are Riva's Lesson-Plan Creator. You design elaborate, teachable spoken-English lesson plans that Riva delivers aloud, one step at a time. Each step's content is an authoritative reference for objectives, target phrases, and question intent — Riva's Lesson Deliverer adapts the spoken wording per learner at delivery time. Every step is voice-first: short sentences, natural pacing, and language that sounds like a friendly teacher talking—not a textbook or app tutorial.
 
 ${RIVA_DELIVERY_RULE}
-${RIVA_LANGUAGE_RULE}
+${languageRules}
 ${RIVA_GRAMMAR_RULE}
 
 ## Step count and structure (required)
@@ -231,6 +238,7 @@ export async function classifyTopicChangeIntent(input: {
   learnerContext?: LearnerContextInput;
 }): Promise<TopicChangeIntentResult> {
   const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {});
+  const languageRules = formatLanguageRulesForPrompt(input.learnerContext?.selfDeclaredLevel);
   return callOpenRouterJson(
     [
       {
@@ -245,7 +253,7 @@ Set wants_topic_change false for normal lesson answers, SAR repeats, open-ended 
 If they name a concrete replacement topic (e.g. restaurants, travel, interviews), set topic_clear true and put a short title in new_topic_title.
 If they only say something vague like "something else" / "kuch aur" / "change topic" without naming what, set topic_clear false and new_topic_title null.
 
-acknowledgment should be one short Hinglish sentence acknowledging the switch (or empty if wants_topic_change is false). ${RIVA_DELIVERY_RULE} ${RIVA_LANGUAGE_RULE} Return only JSON.${contextBlock}`,
+acknowledgment should be one short sentence acknowledging the switch matching the CEFR Hinglish mix (or empty if wants_topic_change is false). ${RIVA_DELIVERY_RULE} ${languageRules} Return only JSON.${contextBlock}`,
       },
       {
         role: "user",
@@ -286,6 +294,7 @@ export async function deliverLessonTurn(input: {
   const contextBlock = buildLearnerContextBlock(input.learnerContext ?? {}, {
     recentConversation: input.recentConversation,
   });
+  const languageRules = formatLanguageRulesForPrompt(input.level);
   const lessonPlanJson = formatLessonPlanForPrompt(input.lessonSteps);
   const currentStepJson = JSON.stringify(
     {
@@ -340,11 +349,11 @@ ${sarBlock}`
 You receive a lesson plan as **grounding reference**, not a script. Each step's \`content\` field holds objectives, target phrases, question intent, and teaching notes. Cover the same goals, SAR targets, and open-ended aims as the plan, but **personalize** wording, examples, encouragement, pacing, and difficulty based on the learner profile and their latest response.
 
 ${RIVA_DELIVERY_RULE}
-${RIVA_LANGUAGE_RULE}
+${languageRules}
 ${RIVA_GRAMMAR_RULE}
 
 ## Your job this turn
-- Produce one natural spoken reply for Riva to say aloud now — in Hinglish, except English phrases being taught.
+- Produce one natural spoken reply for Riva to say aloud now — matching the CEFR Hinglish mix, except English phrases being taught.
 - When step reference content includes grammar notes, weave them into spoken_reply naturally — warm teacher tone, 1–2 grammar points max, spoken-friendly (not textbook).
 - Decide whether to advance to the next lesson step after this reply, or stay on the current step for another attempt.
 - **Questions live in the UI only.** For \`question\` steps, the app renders a QUESTION section from step metadata inside Riva's message bubble. Your \`spoken_reply\` must NEVER include the SAR target sentence or the open-ended question text on step_intro. On SAR retry (\`reteach_current_step\` true), give Hinglish feedback only — the app posts a fresh QUESTION section in a separate message.
@@ -393,10 +402,10 @@ Rules:
 - On \`learner_response\` turns — Hinglish feedback only; if staying on step, a brief retry cue is enough (SAR retry card is posted by the app).
 
 ## Adaptation rules
-- Match CEFR level vocabulary and sentence length.
-- If the learner is struggling, simplify, rephrase, and encourage in Hinglish.
-- If they are doing well, add slight challenge or richer phrasing.
-- Never read step content verbatim unless it is already perfect natural speech — prefer fresh, conversational Hinglish delivery.
+- Match CEFR level vocabulary, sentence length, and the CEFR Hinglish mix rule above.
+- If the learner is struggling, simplify, rephrase, and encourage using more Hindi scaffolding.
+- If they are doing well, add slight challenge or richer phrasing (more English OK at higher CEFR).
+- Never read step content verbatim unless it is already perfect natural speech — prefer fresh, conversational delivery matching the CEFR mix.
 - Do not mention JSON, lesson plans, scores as numbers to the learner, or app mechanics.
 
 Return only JSON.${contextBlock}`,

@@ -1,10 +1,47 @@
 import { describe, expect, it } from "vitest";
-import { isContinueAdvancePhrase, RIVA_GRAMMAR_RULE, RIVA_LANGUAGE_RULE, stripUiInstructions } from "@/lib/content";
+import {
+  formatLanguageRulesForPrompt,
+  getHinglishCompositionRule,
+  isContinueAdvancePhrase,
+  resolveHinglishCompositionBand,
+  RIVA_GRAMMAR_RULE,
+  RIVA_LANGUAGE_RULE,
+  stripUiInstructions,
+} from "@/lib/content";
 
 describe("RIVA_LANGUAGE_RULE", () => {
   it("defines Hinglish-first language guidance", () => {
     expect(RIVA_LANGUAGE_RULE).toContain("Hinglish");
     expect(RIVA_LANGUAGE_RULE).toContain("expectedAnswer");
+  });
+});
+
+describe("CEFR Hinglish composition", () => {
+  it("maps levels to support_heavy, balanced, and english_leaning bands", () => {
+    expect(resolveHinglishCompositionBand("A1")).toBe("support_heavy");
+    expect(resolveHinglishCompositionBand("A2")).toBe("support_heavy");
+    expect(resolveHinglishCompositionBand("B1")).toBe("balanced");
+    expect(resolveHinglishCompositionBand("B2")).toBe("balanced");
+    expect(resolveHinglishCompositionBand("C1")).toBe("english_leaning");
+    expect(resolveHinglishCompositionBand("C2")).toBe("english_leaning");
+  });
+
+  it("defaults unknown or missing level to A2 support_heavy", () => {
+    expect(resolveHinglishCompositionBand(null)).toBe("support_heavy");
+    expect(resolveHinglishCompositionBand("")).toBe("support_heavy");
+    expect(resolveHinglishCompositionBand("xyz")).toBe("support_heavy");
+  });
+
+  it("returns band-specific composition rules", () => {
+    expect(getHinglishCompositionRule("A1")).toContain("support-heavy");
+    expect(getHinglishCompositionRule("B1")).toContain("balanced");
+    expect(getHinglishCompositionRule("C1")).toContain("English-leaning");
+  });
+
+  it("combines base language rule with CEFR mix in prompt helper", () => {
+    const block = formatLanguageRulesForPrompt("B2");
+    expect(block).toContain(RIVA_LANGUAGE_RULE);
+    expect(block).toContain("balanced");
   });
 });
 

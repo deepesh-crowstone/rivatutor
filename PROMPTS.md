@@ -24,7 +24,7 @@ Complete inventory of LLM prompts, shared delivery rules, fallback delivery copy
 | 12  | `loadRecentConversation`                 | `lib/profile-pipeline.ts` | Conversation formatter  | **Active** — exported; formats recent chat as `role: content` lines |
 | 13  | `buildLearnerContextBlock`               | `lib/user-extraction.ts`  | Context injection       | **Active** — appended to all `lib/ai.ts` system prompts             |
 | 14  | `RIVA_DELIVERY_RULE`                     | `lib/content.ts`          | Shared rule constant    | **Active** — injected into all `lib/ai.ts` system prompts           |
-| 15  | `RIVA_LANGUAGE_RULE`                     | `lib/content.ts`          | Shared rule constant    | **Active** — Hinglish-first language rule for all `lib/ai.ts` prompts |
+| 15  | `RIVA_LANGUAGE_RULE` + CEFR mix          | `lib/content.ts`          | Shared rule + helper    | **Active** — `formatLanguageRulesForPrompt(level)` for all `lib/ai.ts` prompts |
 | 16  | `RIVA_GRAMMAR_RULE`                      | `lib/content.ts`          | Shared rule constant    | **Active** — grammar teaching rule for lesson plan + delivery prompts |
 | 17  | `buildFallbackLessonDelivery`            | `lib/lesson-delivery.ts`  | Hardcoded fallback copy | **Active** — when `deliverLessonTurn` LLM call fails               |
 | 18  | Onboarding assistant messages            | `lib/onboarding.ts`       | Hardcoded copy          | **Active** — Hinglish-first                                         |
@@ -110,34 +110,44 @@ Never reference UI controls, buttons, taps, clicks, or app mechanics. Speak as a
 
 ---
 
-### `RIVA_LANGUAGE_RULE`
+### `RIVA_LANGUAGE_RULE` + CEFR Hinglish composition
 
 **File:** `lib/content.ts`
 
-**Used by:** All LLM functions in `lib/ai.ts` (`judgeIntentClarity`, `planCurriculum`, `createLessonPlan`, `deliverLessonTurn`, `classifyTopicChangeIntent`).
+**Used by:** All LLM functions in `lib/ai.ts` via `formatLanguageRulesForPrompt(level)` (`judgeIntentClarity`, `planCurriculum`, `createLessonPlan`, `deliverLessonTurn`, `classifyTopicChangeIntent`).
 
-**Verbatim text:**
+**Base rule (`RIVA_LANGUAGE_RULE`) verbatim:**
 
 ```
 Write all explanations, questions (in prose), feedback, encouragement, and CTAs in natural Hinglish (Roman script, warm Indian classroom tone). Keep phrases to repeat, SAR expectedAnswer, and model English sentences in English only. QUESTION card prompts are shown in the UI — the deliverer must not duplicate English question text in spoken_reply for open-ended steps.
 ```
 
+**CEFR mix bands** (`getHinglishCompositionRule` / `resolveHinglishCompositionBand`):
+
+| Band | Levels | Instructional voice |
+| ---- | ------ | ------------------- |
+| `support_heavy` | A1–A2 | Mostly Roman Hindi; short/simple; English only for taught phrases |
+| `balanced` | B1–B2 | ~50/50 Hinglish; longer sentences OK |
+| `english_leaning` | C1–C2 | Mostly English; light Hindi for warmth only |
+
+Unknown/missing level defaults to **A2** (`support_heavy`). SAR `expectedAnswer` / model sentences stay English at every level.
+
 **Language split:**
 
 | Copy type | Language |
 | --------- | -------- |
-| Explanations, setup, feedback, encouragement, CTAs | Hinglish (Roman script) |
+| Explanations, setup, feedback, encouragement, CTAs | CEFR-banded Hinglish mix (Roman script) |
 | SAR `expectedAnswer`, model sentences, phrases to repeat | English |
-| SAR / open-ended `content` in lesson plan | Hinglish label + English sentence (SAR) or Hinglish prompt (open-ended) |
-| Topic titles / descriptions | Hinglish or bilingual |
+| SAR / open-ended `content` in lesson plan | Mix-appropriate label + English sentence (SAR) or prompt (open-ended) |
+| Topic titles / descriptions | Match CEFR mix (more Hinglish at A1–B2; clearer English OK at C1–C2) |
 
-**Tone examples:**
+**Tone examples by band:**
 
-- Concept setup: "Office mein pehli baar milne par aap yeh keh sakte hain:" then English phrase
-- SAR pass feedback: "Bahut badhiya! Bilkul sahi bola."
-- SAR fail feedback: "Achha try tha. Phir se ek baar repeat karein."
-- Open-ended setup: "Socho agar tumhe apne friend ko greet karna ho — mic dabao aur batao."
-- Topic pick: "Neeche se topic chuno ya bolo kya practice karna hai."
+- **A1–A2:** "Airport pe check-in hota hai. Yeh short sentence bolna seekhenge."
+- **B1–B2:** "At the airport check-in, hum politely baat karte hain. Yeh pattern formal situations mein kaam aata hai."
+- **C1–C2:** "At check-in, keep your tone calm and clear. We'll practice a natural way to hand over documents."
+- SAR pass (A1–A2): "Bahut badhiya! Bilkul sahi bola."
+- SAR pass (C1–C2): "Nice — that sounded natural."
 
 ---
 
@@ -314,7 +324,7 @@ Return JSON:
 You are Riva's Lesson-Plan Creator. You design elaborate, teachable spoken-English lesson plans that Riva delivers aloud, one step at a time. Each step's content is an authoritative reference for objectives, target phrases, and question intent — Riva's Lesson Deliverer adapts the spoken wording per learner at delivery time. Every step is voice-first: short sentences, natural pacing, and language that sounds like a friendly teacher talking—not a textbook or app tutorial.
 
 {RIVA_DELIVERY_RULE}
-{RIVA_LANGUAGE_RULE}
+{formatLanguageRulesForPrompt(level)}
 {RIVA_GRAMMAR_RULE}
 
 ## Step count and structure (required)
@@ -373,7 +383,7 @@ Return only JSON.{contextBlock}
 **Placeholders:**
 
 - `{RIVA_DELIVERY_RULE}` — value of `RIVA_DELIVERY_RULE` constant
-- `{RIVA_LANGUAGE_RULE}` — value of `RIVA_LANGUAGE_RULE` constant
+- `{formatLanguageRulesForPrompt(level)}` — `RIVA_LANGUAGE_RULE` + CEFR Hinglish mix for `input.level`
 - `{RIVA_GRAMMAR_RULE}` — value of `RIVA_GRAMMAR_RULE` constant
 - `{contextBlock}` — output of `buildLearnerContextBlock(input.learnerContext ?? {})`
 
@@ -577,7 +587,7 @@ Set wants_topic_change false for normal lesson answers, SAR repeats, open-ended 
 If they name a concrete replacement topic (e.g. restaurants, travel, interviews), set topic_clear true and put a short title in new_topic_title.
 If they only say something vague like "something else" / "kuch aur" / "change topic" without naming what, set topic_clear false and new_topic_title null.
 
-acknowledgment should be one short Hinglish sentence acknowledging the switch (or empty if wants_topic_change is false). {RIVA_DELIVERY_RULE} {RIVA_LANGUAGE_RULE} Return only JSON.{contextBlock}
+acknowledgment should be one short sentence acknowledging the switch matching the CEFR Hinglish mix (or empty if wants_topic_change is false). {RIVA_DELIVERY_RULE} {formatLanguageRulesForPrompt(selfDeclaredLevel)} Return only JSON.{contextBlock}
 ```
 
 #### User prompt
@@ -1013,7 +1023,7 @@ submitLessonAnswer
 | `buildFallbackLessonDelivery`        | Active | LLM delivery failure fallback                              |
 | `buildLearnerContextBlock`           | Active | Injected into all `lib/ai.ts` prompts                      |
 | `RIVA_DELIVERY_RULE`                 | Active | Injected into all `lib/ai.ts` system prompts               |
-| `RIVA_LANGUAGE_RULE`                 | Active | Hinglish-first language rule for all `lib/ai.ts` prompts   |
+| `RIVA_LANGUAGE_RULE` + CEFR mix      | Active | `formatLanguageRulesForPrompt(level)` for all `lib/ai.ts` prompts |
 | `RIVA_GRAMMAR_RULE`                  | Active | Grammar teaching rule for lesson plan + delivery prompts    |
 
 
