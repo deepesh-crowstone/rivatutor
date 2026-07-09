@@ -69,12 +69,12 @@ describe("detectTopicChangeIntent", () => {
     expect(detectTopicChangeIntent("I practice speaking every day", "Airport").wantsChange).toBe(false);
   });
 
-  it("treats soft learn-about requests as soft confidence for LLM confirmation", () => {
+  it("treats want-to / learn-about requests for a different topic as a strong switch", () => {
     const result = detectTopicChangeIntent("I want to learn about restaurants", "Airport check-in");
     expect(result.wantsChange).toBe(true);
     expect(result.topicClear).toBe(true);
-    expect(result.newTopicTitle).toBe("restaurants");
-    expect(result.confidence).toBe("soft");
+    expect(result.newTopicTitle).toMatch(/restaurants/i);
+    expect(result.confidence).toBe("strong");
   });
 
   it("does not treat normal lesson answers as topic changes", () => {
